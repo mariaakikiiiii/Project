@@ -1,5 +1,11 @@
 # GameOn
 
+**Already running the first version? Follow [the upgrade guide](docs/UPGRADE.md). Run 07-platform-upgrade.sql once after backing up; do not rerun the original schema.**
+
+![Redesigned GameOn discovery interface](docs/screenshots/discovery-preview.png)
+
+*Design preview uses synthetic UI test fixtures.*
+
 A university lab implementation using SQL Server 2022, T-SQL, ASP.NET Core 8 + ADO.NET, and React 19. No ORM is used.
 
 ## 1. Create the database and schema
@@ -10,8 +16,10 @@ A DBA creates an empty `GameOn` database using SQL Server or Azure SQL. Run thes
 2. [02-procedures.sql](database/02-procedures.sql): transactional join/cancel/promotion, creation, discovery, roster, account and history operations.
 3. [03-seed.sql](database/03-seed.sql): development fixtures and **200,000 activity events**, generated without per-row loops. The fixture host cannot sign in; register your own account.
 4. Provision a dedicated `gameon_api` server login securely outside source control, then run [04-security.sql](database/04-security.sql). Use a distinct migration identity. Do not grant the API identity admin or direct table permissions.
-5. Run [05-tests.sql](database/05-tests.sql), then follow the two-session concurrency lab in [architecture.md](docs/architecture.md).
-6. Run [06-performance.sql](database/06-performance.sql) with actual execution plans enabled for the large-table lab.
+5. Install [07-platform-upgrade.sql](database/07-platform-upgrade.sql) in SQLCMD Mode as described in the upgrade guide.
+6. Run [05-tests.sql](database/05-tests.sql), then follow the two-session concurrency lab in [architecture.md](docs/architecture.md).
+7. Run [08-platform-tests.sql](database/08-platform-tests.sql) on a disposable upgraded database.
+8. Run [06-performance.sql](database/06-performance.sql) with actual execution plans enabled for the large-table lab.
 
 SQL scripts use `GO`, which is handled by SSMS/sqlcmd, not by SqlCommand. They target a fresh database; schema/security migrations are deliberately not destructive rerunnable scripts. The data seed is rerunnable. No database is created automatically by the application.
 
@@ -39,7 +47,7 @@ npm ci
 npm run dev
 ```
 
-Vite forwards `/api` to `https://localhost:7043`. Both UI and API use one browser origin through this proxy; no permissive CORS is required. `npm run build` creates `frontend/dist` for deployment behind the same HTTPS origin as the API. The UI includes registration/sign-in, sport/date/area filters, game details and roster, hosting, and My Games with queue positions. Dates are stored in UTC; discovery's date filter is explicitly UTC, while game start displays and input use browser local time.
+Vite forwards `/api` to `https://localhost:7043`. Both UI and API use one browser origin through this proxy; no permissive CORS is required. `npm run build` creates `frontend/dist` for deployment behind the same HTTPS origin as the API. The redesigned UI includes personalized discovery, editable profiles/preferences, game details/maps/rosters, host editing and cancellation, My Games, host-covered places, and a persisted notification inbox. See the upgrade guide for optional Maps Embed and password-recovery email activation. Online collection and cash-out await the merchant provider integration. Dates are stored in UTC; discovery's date filter is explicitly UTC, while game start displays and input use browser local time.
 
 ## 4. Functional validation
 

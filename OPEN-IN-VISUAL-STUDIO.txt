@@ -11,3 +11,5 @@ The SQL scripts are in database/. Frontend source is in frontend/.
 Builds and security middleware smoke tests passed in the cloud. SQL Server and end-to-end database workflows have not yet been validated; see docs/validation.md.
 
 Generated dependencies and build output are omitted; npm and NuGet restore them.
+
+PLATFORM UPGRADE: read docs/UPGRADE.md. Existing databases must apply 07-platform-upgrade.sql once in SQLCMD Mode. Do not rerun 01-schema.sql. Online cash-out needs your merchant-provider integration; Maps Embed and recovery email need secure configuration.

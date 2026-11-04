@@ -1,100 +1,1548 @@
-import React, {useEffect, useState} from 'react';
-import {createRoot} from 'react-dom/client';
-import {api, refreshCsrf} from './api';
-import './style.css';
-const when = v => new Date(v + (v.endsWith('Z') ? '' : 'Z')).toLocaleString();
+import React, { useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { api, refreshCsrf } from "./api";
+import {
+  dateOf,
+  localInput,
+  price,
+  availableCovered,
+  playable,
+  mapQuery,
+} from "./domain";
+import "./style.css";
 
-function GameCards({games,onSelect}) {
-  return games.length ? <div className="cards">{games.map(g=><article key={g.gameId}>
-    <h3>{g.sport} · {g.area}</h3><p>{g.venue}</p><p>{when(g.startsAt)}</p>
-    <p>{g.playerCount}/{g.capacity} players{g.status && ` · ${g.status}`}
-      {g.status === 'Waitlisted' && ` · Queue #${g.queuePosition}`}</p>
-    <button onClick={()=>onSelect(g.gameId)}>View details</button>
-  </article>)}</div> : <p>No games found.</p>;
+function Mark({ name }) {
+  const paths = {
+    pin: "M7 17 17 7M7 7h10v10",
+    back: "M19 12H5m6-6-6 6 6 6",
+    check: "m5 12 4 4L19 6",
+    discover: "m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+    games: "M3 5h18v16H3zM7 2v6m10-6v6M3 11h18",
+    inbox: "M18 8a6 6 0 0 0-12 0c0 8-3 8-3 10h18c0-2-3-2-3-10M10 21h4",
+    profile: "M20 21a8 8 0 0 0-16 0M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
+    host: "M12 5v14M5 12h14",
+  };
+  return (
+    <svg
+      aria-hidden="true"
+      className="icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d={paths[name] || paths.pin} />
+    </svg>
+  );
 }
-function Discovery({lookups,onSelect}) {
-  const [filters,setFilters]=useState({sportId:'',date:'',area:''});
-  const [games,setGames]=useState([]), [error,setError]=useState(''), [busy,setBusy]=useState(false);
-  async function search(e) {
-    e?.preventDefault(); setError(''); setBusy(true);
-    try { setGames(await api('/games?'+new URLSearchParams(Object.entries(filters).filter(([,v])=>v)))); }
-    catch(e){setError(e.message);} finally {setBusy(false);}
+function Alert({ children }) {
+  return children ? (
+    <p className="alert" role="alert">
+      {children}
+    </p>
+  ) : null;
+}
+function Empty({ title, children, action }) {
+  return (
+    <div className="empty">
+      <span aria-hidden="true">◌</span>
+      <h3>{title}</h3>
+      <p>{children}</p>
+      {action}
+    </div>
+  );
+}
+function Loading() {
+  return (
+    <div role="status" className="loading">
+      <span className="spinner" /> Finding your next good game…
+    </div>
+  );
+}
+function useResource(path, dependency = 0) {
+  const [state, setState] = useState({ data: null, error: "", loading: true });
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ data: null, error: "", loading: true });
+    api(path, "GET", undefined, { signal: controller.signal })
+      .then((data) => setState({ data, error: "", loading: false }))
+      .catch((error) => {
+        if (error.name !== "AbortError")
+          setState({ data: null, error: error.message, loading: false });
+      });
+    return () => controller.abort();
+  }, [path, dependency]);
+  return state;
+}
+function Court({ sport, large = false }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`court ${sport?.toLowerCase()} ${large ? "large" : ""}`}
+    >
+      <div className="court-lines">
+        <i />
+        <b />
+        <em />
+      </div>
+      <span>
+        {sport === "Football"
+          ? "90 MINUTES. NEW FRIENDS."
+          : sport === "Padel"
+            ? "GOOD RALLIES. BETTER COMPANY."
+            : "YOUR NEXT CREW IS HERE."}
+      </span>
+    </div>
+  );
+}
+function GameCard({ game: g, select, user }) {
+  const covered = availableCovered(g);
+  return (
+    <article className="game-card">
+      <button
+        className="card-art"
+        aria-label={`View ${g.sport} at ${g.venue}`}
+        onClick={() => select(g.gameId)}
+      >
+        <Court sport={g.sport} />
+        <span className="sport-tag">{g.sport}</span>
+        {covered > 0 && (
+          <span className="covered-tag">
+            Host covers {covered} {covered === 1 ? "place" : "places"}
+          </span>
+        )}
+      </button>
+      <div className="card-content">
+        <div className="eyebrow">
+          {dateOf(g.startsAt).toLocaleDateString(undefined, {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          })}{" "}
+          ·{" "}
+          {dateOf(g.startsAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </div>
+        <h3>
+          <button className="text-button" onClick={() => select(g.gameId)}>
+            {g.sport} at {g.venue}
+          </button>
+        </h3>
+        <p className="muted">
+          <Mark name="pin" />
+          {g.area}, Lebanon
+        </p>
+        {(g.matchesSport || g.matchesArea) && (
+          <p className="match">
+            ✦{" "}
+            {g.matchesSport && g.matchesArea
+              ? "Your sport. Your neighborhood."
+              : g.matchesSport
+                ? "Matches your favorite sport"
+                : "In your preferred area"}
+          </p>
+        )}
+        <div className="card-meta">
+          <span>
+            <strong>{g.playerCount}</strong> / {g.capacity} players
+          </span>
+          <strong>{price(g)}</strong>
+        </div>
+        <div
+          className="capacity"
+          aria-label={`${g.playerCount} of ${g.capacity} places filled`}
+        >
+          <span
+            style={{
+              width: `${Math.min(100, (g.playerCount / g.capacity) * 100)}%`,
+            }}
+          />
+        </div>
+        <div className="card-bottom">
+          <span
+            className={`pill ${g.gameStatus === "Cancelled" ? "danger" : ""}`}
+          >
+            {g.gameStatus === "Cancelled"
+              ? "Cancelled"
+              : g.status === "Waitlisted"
+                ? `Waitlist #${g.queuePosition}`
+                : g.status ||
+                  (g.capacity === g.playerCount
+                    ? "Waitlist open"
+                    : `${g.capacity - g.playerCount} places left`)}
+          </span>
+          {user?.userId === g.hostUserId && (
+            <span className="host-label">You host</span>
+          )}
+          {g.isSponsored && <span className="pill">Fee covered</span>}
+        </div>
+      </div>
+    </article>
+  );
+}
+function Feed({ lookups, user, select, navigate, revision }) {
+  const [filters, setFilters] = useState({
+    sportId: "",
+    area: "",
+    date: "",
+    freeOnly: false,
+  });
+  const [query, setQuery] = useState("");
+  const { data, error, loading } = useResource("/games?" + query, revision);
+  function search(event) {
+    event?.preventDefault();
+    setQuery(
+      new URLSearchParams(
+        Object.entries(filters).filter(([, v]) => v !== "" && v !== false),
+      ).toString(),
+    );
   }
-  useEffect(()=>{search();},[]);
-  return <section><h2>Discover your next game</h2><form onSubmit={search}>
-    <label>Sport<select value={filters.sportId} onChange={e=>setFilters({...filters,sportId:e.target.value})}>
-      <option value="">All sports</option>{lookups.sports.map(s=><option key={s.sportId} value={s.sportId}>{s.name}</option>)}
-    </select></label>
-    <label>Date (UTC)<input type="date" value={filters.date} onChange={e=>setFilters({...filters,date:e.target.value})}/></label>
-    <label>Area<select value={filters.area} onChange={e=>setFilters({...filters,area:e.target.value})}>
-      <option value="">All areas</option>{[...new Set(lookups.venues.map(v=>v.area))].map(a=><option key={a}>{a}</option>)}
-    </select></label><button disabled={busy}>{busy?'Searching…':'Find games'}</button>
-  </form><p role="alert">{error}</p><GameCards games={games} onSelect={onSelect}/></section>;
+  function sport(id) {
+    const next = { ...filters, sportId: String(id) };
+    setFilters(next);
+    setQuery(
+      new URLSearchParams(
+        Object.entries(next).filter(([, v]) => v !== "" && v !== false),
+      ).toString(),
+    );
+  }
+  return (
+    <>
+      <section className="hero">
+        <div className="hero-copy">
+          <span className="overline">
+            <span className="live-dot" /> GOOD GAMES START WITH GOOD PEOPLE
+          </span>
+          <h1>
+            {user ? (
+              <>
+                Your next game,
+                <br />
+                <em>{user.name.split(" ")[0]}.</em>
+              </>
+            ) : (
+              <>
+                Less scrolling.
+                <br />
+                <em>More playing.</em>
+              </>
+            )}
+          </h1>
+          <p>
+            Pick your sport. Find your people. There’s always room for one more.
+          </p>
+          <div className="hero-actions">
+            <button
+              className="primary"
+              onClick={() =>
+                document
+                  .getElementById("discover-filters")
+                  .scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              Find my next game <Mark name="pin" />
+            </button>
+            <button className="hero-secondary" onClick={() => navigate("host")}>
+              Bring your own crew +
+            </button>
+          </div>
+          <div className="hero-note">
+            <span className="mini-avatars">
+              <i>M</i>
+              <i>J</i>
+              <i>R</i>
+            </span>
+            <span>Casual games. Real connections. Across Lebanon.</span>
+          </div>
+        </div>
+        <div className="hero-visual">
+          <div className="orbit one" />
+          <div className="orbit two" />
+          <div className="hero-ball">
+            <svg viewBox="0 0 200 200" aria-hidden="true">
+              <circle cx="100" cy="100" r="98" />
+              <path d="M2 100h196M100 2v196M28 30c80 5 80 135 0 140M172 30c-80 5-80 135 0 140" />
+            </svg>
+          </div>
+          <div className="floating-card">
+            <span>THE ONE-MORE CLUB</span>
+            <strong>One player short?</strong>
+            <p>
+              Offer a host-covered place.
+              <br />
+              Their game. Your treat.
+            </p>
+            <span className="tiny-pill">More play. Less friction.</span>
+          </div>
+          <span className="visual-label">BEIRUT & BEYOND ↗</span>
+        </div>
+      </section>
+      <div className="section-heading">
+        <div>
+          <span className="overline">FIND YOUR KIND OF GAME</span>
+          <h2>{user ? "Picked with you in mind" : "A game for every mood"}</h2>
+        </div>
+        {user ? (
+          <button className="text-link" onClick={() => navigate("profile")}>
+            Tune your preferences ↗
+          </button>
+        ) : (
+          <span className="muted">
+            Sign in for a feed that knows your game.
+          </span>
+        )}
+      </div>
+      <div className="sport-chips" aria-label="Filter by sport">
+        <button
+          className={!filters.sportId ? "selected" : ""}
+          onClick={() => sport("")}
+        >
+          All games
+        </button>
+        {lookups.sports.map((s) => (
+          <button
+            key={s.sportId}
+            className={String(s.sportId) === filters.sportId ? "selected" : ""}
+            onClick={() => sport(s.sportId)}
+          >
+            {s.name === "Basketball" ? "◉" : s.name === "Football" ? "⬡" : "◍"}{" "}
+            {s.name}
+          </button>
+        ))}
+      </div>
+      <form id="discover-filters" className="filter-bar" onSubmit={search}>
+        <label>
+          Neighborhood
+          <select
+            value={filters.area}
+            onChange={(e) => setFilters({ ...filters, area: e.target.value })}
+          >
+            <option value="">Anywhere in Lebanon</option>
+            {[...new Set(lookups.venues.map((v) => v.area))].map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Day (UTC)
+          <input
+            type="date"
+            value={filters.date}
+            onChange={(e) => setFilters({ ...filters, date: e.target.value })}
+          />
+        </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={filters.freeOnly}
+            onChange={(e) =>
+              setFilters({ ...filters, freeOnly: e.target.checked })
+            }
+          />{" "}
+          Free or host-covered
+        </label>
+        <button className="primary">Find games ↗</button>
+      </form>
+      <Alert>{error}</Alert>
+      {loading ? (
+        <Loading />
+      ) : data?.length ? (
+        <div className="cards">
+          {data.map((g) => (
+            <GameCard key={g.gameId} game={g} select={select} user={user} />
+          ))}
+        </div>
+      ) : (
+        !error && (
+          <Empty
+            title="Your next game starts with you"
+            action={
+              <button className="primary" onClick={() => navigate("host")}>
+                Host a game +
+              </button>
+            }
+          >
+            Try another day or neighborhood, or bring a new game to the
+            community.
+          </Empty>
+        )
+      )}
+      <section className="community-banner">
+        <span className="banner-symbol" aria-hidden="true">
+          <Mark name="pin" />
+        </span>
+        <div>
+          <span className="overline">ONE MORE MAKES THE GAME</span>
+          <h2>Short a player? Cover their place.</h2>
+          <p>
+            Invite someone to play for free when you host. A small gesture. A
+            full court.
+          </p>
+        </div>
+        <button className="primary" onClick={() => navigate("host")}>
+          Host & give a place
+        </button>
+      </section>
+    </>
+  );
 }
-function GameDetails({id,onBack}) {
-  const [data,setData]=useState(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  async function load(){setData(await api(`/games/${id}`));}
-  useEffect(()=>{load().catch(e=>setError(e.message));},[id]);
-  async function act(method,path){setBusy(true);setError('');setMessage('');try {
-    const r=await api(`/games/${id}${path}`,method);setMessage(r.status);await load();
-  }catch(e){setError(e.message);}finally{setBusy(false);}}
-  return <section><button onClick={onBack}>← Back</button><p role="alert">{error}</p><p role="status">{message}</p>{data && <>
-    <h2>{data.game.sport} at {data.game.venue}</h2><p>{when(data.game.startsAt)} · {data.game.area}</p>
-    <p>{data.game.playerCount}/{data.game.capacity} players (host included)</p>
-    <button disabled={busy} onClick={()=>act('POST','/join')}>Join / enter waitlist</button>{' '}
-    <button disabled={busy} onClick={()=>act('DELETE','/participation')}>Leave game / waitlist</button>
-    <h3>Roster</h3><ul>{data.roster.map(p=><li key={p.userId}>{p.displayName}{p.userId===data.game.hostUserId?' · Host':''}</li>)}</ul>
-  </>}</section>;
+function Details({ id, user, config, select, navigate, lookups, notify }) {
+  const [version, setVersion] = useState(0),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [editing, setEditing] = useState(false),
+    [confirmCancel, setConfirmCancel] = useState(false);
+  const {
+    data,
+    loading,
+    error: loadError,
+  } = useResource(`/games/${id}`, version);
+  async function act(path, method = "POST", message = "Your game is updated.") {
+    if (!user) return navigate("auth");
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api(`/games/${id}${path}`, method);
+      notify(result.message || message);
+      setVersion((v) => v + 1);
+      setConfirmCancel(false);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (loading) return <Loading />;
+  if (loadError) return <Alert>{loadError}</Alert>;
+  if (!data) return null;
+  const g = data.game,
+    host = user?.userId === g.hostUserId,
+    member = data.roster.some((p) => p.userId === user?.userId),
+    covered = availableCovered(g);
+  if (editing)
+    return (
+      <GameForm
+        lookups={lookups}
+        existing={g}
+        onSaved={() => {
+          setEditing(false);
+          setVersion((v) => v + 1);
+          notify("Game updated. Players have been notified.");
+        }}
+        onBack={() => setEditing(false)}
+      />
+    );
+  const query = mapQuery(g);
+  return (
+    <>
+      <button className="text-link back" onClick={() => navigate("discover")}>
+        ← Back to games
+      </button>
+      <div className="detail-hero">
+        <Court sport={g.sport} large />
+        <div>
+          <span className="overline">
+            {g.sport.toUpperCase()} · {g.area.toUpperCase()}
+          </span>
+          <h1>
+            {g.sport} at {g.venue}
+          </h1>
+          <p>Hosted by {host ? "you" : g.hostName}</p>
+          {g.gameStatus === "Cancelled" && (
+            <span className="pill danger">This game was cancelled</span>
+          )}
+        </div>
+      </div>
+      <div className="detail-layout">
+        <div>
+          <section className="panel">
+            <h2>Good to know</h2>
+            <div className="detail-facts">
+              <div>
+                <span>WHEN</span>
+                <strong>
+                  {dateOf(g.startsAt).toLocaleDateString([], {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </strong>
+                <p>
+                  {dateOf(g.startsAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  · your local time
+                </p>
+              </div>
+              <div>
+                <span>WHERE</span>
+                <strong>{g.venue}</strong>
+                <p>
+                  {g.address}, {g.area}
+                </p>
+              </div>
+            </div>
+            <p className="description">
+              {g.description ||
+                "A casual game, a welcoming crew, and a good reason to get moving. Bring your gear and arrive a few minutes early."}
+            </p>
+          </section>
+          <section className="panel">
+            <div className="section-heading">
+              <h2>The crew</h2>
+              <span className="pill">
+                {g.playerCount} / {g.capacity}
+              </span>
+            </div>
+            <ul className="roster">
+              {data.roster.map((p) => (
+                <li key={p.userId}>
+                  <span className="avatar">
+                    {p.displayName.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div>
+                    <strong>{p.displayName}</strong>
+                    <small>
+                      {p.userId === g.hostUserId
+                        ? "Host · bringing everyone together"
+                        : p.isSponsored
+                          ? "Playing with a host-covered place"
+                          : "Ready to play"}
+                    </small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="panel">
+            <div className="section-heading">
+              <h2>Meet you here</h2>
+              <a
+                className="text-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`}
+              >
+                Get directions ↗
+              </a>
+            </div>
+            {config.mapsEmbedApiKey ? (
+              <iframe
+                className="venue-map"
+                title={`Map of ${g.venue}`}
+                loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allowFullScreen
+                src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(config.mapsEmbedApiKey)}&q=${encodeURIComponent(query)}`}
+              />
+            ) : (
+              <a
+                className="map-placeholder"
+                target="_blank"
+                rel="noopener noreferrer"
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`}
+              >
+                <Mark name="pin" />
+                <strong>{g.venue}</strong>
+                <span>
+                  {g.address}, {g.area}
+                </span>
+                <span className="text-link">Open in Google Maps ↗</span>
+              </a>
+            )}
+          </section>
+        </div>
+        <aside>
+          <section className="panel booking">
+            <span className="overline">YOUR NEXT GOOD GAME</span>
+            <h2>{price(g)}</h2>
+            <p className="muted">
+              {Number(g.costPerPlayer)
+                ? "Venue share per player · settle directly with the host."
+                : "Just bring yourself and your game."}
+            </p>
+            {covered > 0 && (
+              <div className="offer">
+                <span>✦ THE ONE-MORE OFFER</span>
+                <h3>
+                  {g.capacity - g.playerCount === 1
+                    ? "One more player. Zero fee."
+                    : "Your place. On the host."}
+                </h3>
+                <p>
+                  {covered} host-covered {covered === 1 ? "place" : "places"}{" "}
+                  available. The host covers your venue share.
+                </p>
+                {!member && (
+                  <button
+                    className="primary full"
+                    disabled={busy || !playable(g)}
+                    onClick={() =>
+                      act(
+                        "/sponsored-place",
+                        "POST",
+                        "You are in! The host covers your venue fee.",
+                      )
+                    }
+                  >
+                    Claim a free place ↗
+                  </button>
+                )}
+              </div>
+            )}
+            <p>
+              <strong>{Math.max(0, g.capacity - g.playerCount)}</strong> places
+              left · {g.playerCount} already in
+            </p>
+            <Alert>{error}</Alert>
+            {playable(g) ? (
+              <>
+                {!member && (
+                  <button
+                    className="primary full"
+                    disabled={busy}
+                    onClick={() =>
+                      act(
+                        "/join",
+                        "POST",
+                        g.playerCount >= g.capacity
+                          ? "You are on the waitlist."
+                          : "Your place is confirmed.",
+                      )
+                    }
+                  >
+                    {busy
+                      ? "One moment…"
+                      : user
+                        ? g.playerCount >= g.capacity
+                          ? "Join the waitlist"
+                          : "Join this game"
+                        : "Sign in to join"}
+                  </button>
+                )}
+                {user && (
+                  <button
+                    className="secondary full"
+                    disabled={busy}
+                    onClick={() =>
+                      act(
+                        "/participation",
+                        "DELETE",
+                        "You left this game or its waitlist.",
+                      )
+                    }
+                  >
+                    Leave game / waitlist
+                  </button>
+                )}
+                <button
+                  className="text-link full"
+                  onClick={() => navigate("mine")}
+                >
+                  Check my place & waitlist →
+                </button>
+              </>
+            ) : (
+              <p className="muted">
+                {g.gameStatus === "Cancelled"
+                  ? "The host cancelled this game."
+                  : "This game has already started."}
+              </p>
+            )}
+          </section>
+          {host && playable(g) && (
+            <section className="panel">
+              <h3>Your game, your crew</h3>
+              <p className="muted">
+                Keep your players up to date. Changes send an in-app
+                notification.
+              </p>
+              <button
+                className="secondary full"
+                onClick={() => setEditing(true)}
+              >
+                Edit game
+              </button>
+              {!confirmCancel ? (
+                <button
+                  className="danger-button full"
+                  onClick={() => setConfirmCancel(true)}
+                >
+                  Cancel hosted game
+                </button>
+              ) : (
+                <div
+                  className="confirm"
+                  role="group"
+                  aria-label="Confirm game cancellation"
+                >
+                  <p>Cancel for everyone? All players will be notified.</p>
+                  <button
+                    className="danger-button full"
+                    disabled={busy}
+                    onClick={() => act("/cancel")}
+                  >
+                    Yes, cancel this game
+                  </button>
+                  <button
+                    className="text-link full"
+                    onClick={() => setConfirmCancel(false)}
+                  >
+                    Keep playing
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+        </aside>
+      </div>
+    </>
+  );
 }
-function HostForm({lookups,onSelect}) {
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
-  async function submit(e){e.preventDefault(); const f=new FormData(e.currentTarget);setError('');setBusy(true);
-    try{const g=await api('/games','POST',{sportId:Number(f.get('sport')),venueId:Number(f.get('venue')),
-      startsAt:new Date(f.get('start')).toISOString(),capacity:Number(f.get('capacity'))});onSelect(g.gameId);}
-    catch(e){setError(e.message);}finally{setBusy(false);}}
-  return <section><h2>Host a game</h2><p>Capacity includes you. Start time uses your local timezone.</p><form onSubmit={submit}>
-    <label>Sport<select required name="sport"><option value="">Choose sport</option>{lookups.sports.map(s=><option key={s.sportId} value={s.sportId}>{s.name}</option>)}</select></label>
-    <label>Venue<select required name="venue"><option value="">Choose venue</option>{lookups.venues.map(v=><option key={v.venueId} value={v.venueId}>{v.name} · {v.area}</option>)}</select></label>
-    <label>Start<input required type="datetime-local" name="start"/></label>
-    <label>Total capacity<input required type="number" name="capacity" min="2" max="100" defaultValue="10"/></label>
-    <button disabled={busy}>{busy?'Creating…':'Create game'}</button>
-  </form><p role="alert">{error}</p></section>;
+function GameForm({ lookups, existing, onSaved, onBack }) {
+  const [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    setBusy(true);
+    setError("");
+    try {
+      const body = {
+        sportId: Number(f.get("sport")),
+        venueId: Number(f.get("venue")),
+        startsAt: new Date(f.get("start")).toISOString(),
+        capacity: Number(f.get("capacity")),
+        description: f.get("description"),
+        costPerPlayer: Number(f.get("price")),
+        currency: f.get("currency"),
+        sponsoredSlots: Number(f.get("sponsored")),
+        revision: existing?.revision,
+      };
+      const result = await api(
+        existing ? `/games/${existing.gameId}` : "/games",
+        existing ? "PUT" : "POST",
+        body,
+      );
+      onSaved(existing ? existing.gameId : result.gameId);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="form-page">
+      <button className="text-link" onClick={onBack}>
+        ← Back
+      </button>
+      <span className="overline">BRING YOUR PEOPLE TOGETHER</span>
+      <h1>
+        {existing ? "Make it a better game." : "Your game. Your invitation."}
+      </h1>
+      <p className="lead">
+        A full court starts with one person saying “let’s play.”
+      </p>
+      <form className="panel form-grid" onSubmit={submit}>
+        {!existing && (
+          <>
+            <label>
+              What are we playing?
+              <select name="sport" required defaultValue="">
+                <option value="" disabled>
+                  Choose a sport
+                </option>
+                {lookups.sports.map((s) => (
+                  <option key={s.sportId} value={s.sportId}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Where’s the game?
+              <select required name="venue" defaultValue="">
+                <option value="" disabled>
+                  Choose a venue
+                </option>
+                {lookups.venues.map((v) => (
+                  <option key={v.venueId} value={v.venueId}>
+                    {v.name} · {v.area}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+        <label>
+          Date & time (your local time)
+          <input
+            required
+            type="datetime-local"
+            name="start"
+            defaultValue={existing ? localInput(existing.startsAt) : ""}
+          />
+        </label>
+        <label>
+          Total places, including you
+          <input
+            required
+            type="number"
+            min="2"
+            max="100"
+            name="capacity"
+            defaultValue={existing?.capacity || 10}
+          />
+        </label>
+        <label>
+          Venue share per player
+          <input
+            required
+            type="number"
+            name="price"
+            min="0"
+            max="99999999.99"
+            step="0.01"
+            defaultValue={existing?.costPerPlayer ?? 0}
+          />
+        </label>
+        <label>
+          Currency
+          <select name="currency" defaultValue={existing?.currency || "USD"}>
+            <option>USD</option>
+            <option>LBP</option>
+          </select>
+        </label>
+        <div className="form-wide offer">
+          <span>✦ MAKE SOMEONE’S DAY</span>
+          <h3>One more player. On you.</h3>
+          <p>
+            Choose how many players you’ll cover the venue fee for. This is your
+            commitment to pay their share at the venue; the app does not
+            transfer money.
+          </p>
+          <label>
+            Host-covered places
+            <input
+              required
+              type="number"
+              min="0"
+              max="99"
+              name="sponsored"
+              defaultValue={existing?.sponsoredSlots || 0}
+            />
+          </label>
+        </div>
+        <label className="form-wide">
+          Set the vibe
+          <textarea
+            name="description"
+            maxLength="1000"
+            rows="4"
+            defaultValue={existing?.description || ""}
+            placeholder="Skill level, what to bring, where to meet… make everyone feel welcome."
+          />
+        </label>
+        <div className="form-wide">
+          <Alert>{error}</Alert>
+          <p className="muted">
+            {existing
+              ? "Price cannot change once other players join. Confirmed places and existing sponsorships must fit the new capacity."
+              : "You are automatically enrolled as host. No online payment is collected."}
+          </p>
+          <button className="primary" disabled={busy}>
+            {busy
+              ? "Saving…"
+              : existing
+                ? "Save & notify the crew"
+                : "Make this game happen ↗"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
-function MyGames({onSelect}) {
-  const [games,setGames]=useState([]),[error,setError]=useState('');
-  useEffect(()=>{api('/me/games').then(setGames).catch(e=>setError(e.message));},[]);
-  return <section><h2>My games & waitlists</h2><p role="alert">{error}</p><GameCards games={games} onSelect={onSelect}/></section>;
+function MyGames({ user, select }) {
+  const [tab, setTab] = useState("upcoming");
+  const { data, error, loading } = useResource("/me/games");
+  const games =
+    data?.filter((g) =>
+      tab === "hosting"
+        ? g.hostUserId === user.userId
+        : tab === "past"
+          ? !playable(g)
+          : playable(g),
+    ) || [];
+  return (
+    <>
+      <span className="overline">YOUR PEOPLE. YOUR PLANS.</span>
+      <h1>Your game plan.</h1>
+      <p className="lead">
+        Confirmed places, waiting lists, and the games you bring to life.
+      </p>
+      <div className="sport-chips">
+        {["upcoming", "hosting", "past"].map((t) => (
+          <button
+            key={t}
+            className={tab === t ? "selected" : ""}
+            onClick={() => setTab(t)}
+          >
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+      <Alert>{error}</Alert>
+      {loading ? (
+        <Loading />
+      ) : games.length ? (
+        <div className="cards">
+          {games.map((g) => (
+            <GameCard key={g.gameId} game={g} select={select} user={user} />
+          ))}
+        </div>
+      ) : (
+        <Empty title="A little room in your game plan">
+          Your games and queue positions will appear here.
+        </Empty>
+      )}
+    </>
+  );
 }
-function Auth({onLogin}) {
-  const [register,setRegister]=useState(false),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  async function submit(e){e.preventDefault();setMessage('');setBusy(true);const f=new FormData(e.currentTarget);
-    try{const body={email:f.get('email'),password:f.get('password'),displayName:f.get('name')};
-      const r=await api(`/auth/${register?'register':'login'}`,'POST',body);
-      if(register){setRegister(false);setMessage(r.message);}else {await refreshCsrf();onLogin(r.name);}
-    }catch(e){setMessage(e.message);}finally{setBusy(false);}}
-  return <section><h2>{register?'Create account':'Sign in'}</h2><form onSubmit={submit}>
-    {register && <label>Display name<input required maxLength="80" name="name" autoComplete="nickname"/></label>}
-    <label>Email<input required type="email" maxLength="254" name="email" autoComplete="email"/></label>
-    <label>Password<input required type="password" name="password" minLength={register?12:1} maxLength="128" autoComplete={register?'new-password':'current-password'}/></label>
-    <button disabled={busy}>Continue</button></form><p role="status">{message}</p>
-    <button onClick={()=>{setRegister(!register);setMessage('');}}>{register?'Already registered? Sign in':'Create account'}</button></section>;
+function Profile({ lookups, onSaved }) {
+  const { data, error, loading } = useResource("/me/profile");
+  const [saving, setSaving] = useState(false),
+    [problem, setProblem] = useState("");
+  async function submit(e) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    setSaving(true);
+    setProblem("");
+    try {
+      await api("/me/profile", "PUT", {
+        displayName: f.get("name"),
+        bio: f.get("bio"),
+        area: f.get("area"),
+        skillLevel: f.get("skill"),
+        sportIds: f.getAll("sports").map(Number),
+      });
+      onSaved(f.get("name"));
+    } catch (e) {
+      setProblem(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  if (loading) return <Loading />;
+  if (error) return <Alert>{error}</Alert>;
+  return (
+    <div className="form-page">
+      <span className="overline">MORE YOU. BETTER GAMES.</span>
+      <h1>What’s your game?</h1>
+      <p className="lead">
+        Your favorite sports and neighborhood shape what you see when you sign
+        in.
+      </p>
+      <form className="panel form-grid" onSubmit={submit}>
+        <label>
+          What should the crew call you?
+          <input
+            required
+            name="name"
+            maxLength="80"
+            defaultValue={data.profile.displayName}
+          />
+        </label>
+        <label>
+          Email
+          <input value={data.profile.email} readOnly />
+        </label>
+        <label>
+          Home court / neighborhood
+          <select name="area" defaultValue={data.profile.area || ""}>
+            <option value="">Anywhere in Lebanon</option>
+            {[...new Set(lookups.venues.map((v) => v.area))].map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Your level
+          <select name="skill" defaultValue={data.profile.skillLevel}>
+            {["All levels", "Beginner", "Intermediate", "Advanced"].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+        <fieldset className="form-wide">
+          <legend>Your favorite sports</legend>
+          <div className="preference-sports">
+            {lookups.sports.map((s) => (
+              <label className="checkbox" key={s.sportId}>
+                <input
+                  type="checkbox"
+                  name="sports"
+                  value={s.sportId}
+                  defaultChecked={data.sports.includes(s.sportId)}
+                />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <label className="form-wide">
+          A little about you
+          <textarea
+            name="bio"
+            maxLength="400"
+            rows="3"
+            defaultValue={data.profile.bio}
+            placeholder="Weekend baller? First-time padel player? There’s a crew for you."
+          />
+        </label>
+        <div className="form-wide">
+          <Alert>{problem}</Alert>
+          <button className="primary" disabled={saving}>
+            {saving ? "Saving…" : "Save my preferences ↗"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
-function App(){
-  const [page,setPage]=useState('discover'),[id,setId]=useState(null),[name,setName]=useState(null);
-  const [lookups,setLookups]=useState({sports:[],venues:[]}),[error,setError]=useState('');
-  useEffect(()=>{api('/lookups').then(setLookups).catch(e=>setError(e.message));
-    api('/auth/me').then(u=>setName(u.name)).catch(()=>{});},[]);
-  function select(id){setId(id);setPage('details');}
-  async function logout(){try{await api('/auth/logout','POST');await refreshCsrf();setName(null);setPage('discover');}catch(e){setError(e.message);}}
-  return <><header><h1>GameOn</h1><p>Find your people. Play your game.</p><nav>
-    <button onClick={()=>setPage('discover')}>Discover</button><button onClick={()=>setPage('host')}>Host a game</button>
-    <button onClick={()=>setPage('mine')}>My games</button>{name?<><span>{name}</span><button onClick={logout}>Sign out</button></>:<button onClick={()=>setPage('auth')}>Sign in</button>}
-  </nav></header><main><p role="alert">{error}</p>
-    {page==='discover' && <Discovery lookups={lookups} onSelect={select}/>}
-    {page==='details' && <GameDetails key={id} id={id} onBack={()=>setPage('discover')}/>}
-    {page==='host' && <HostForm lookups={lookups} onSelect={select}/>}
-    {page==='mine' && <MyGames onSelect={select}/>}
-    {page==='auth' && <Auth onLogin={n=>{setName(n);setPage('discover');}}/>}
-  </main></>;
+function Inbox({ notifications, select, refresh }) {
+  const [older, setOlder] = useState([]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const items = [...(notifications?.items || []), ...older].filter(
+    (x, i, all) =>
+      all.findIndex((y) => y.notificationId === x.notificationId) === i,
+  );
+  async function open(n) {
+    try {
+      await api(`/me/notifications/${n.notificationId}/read`, "POST");
+      await refresh();
+      if (n.gameId) select(n.gameId);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function more() {
+    if (!items.length) return;
+    setBusy(true);
+    try {
+      const r = await api(
+        `/me/notifications?beforeId=${items.at(-1).notificationId}`,
+      );
+      setOlder((v) => [...v, ...r.items]);
+      if (!r.items.length) setError("You are all caught up.");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="inbox">
+      <span className="overline">NEVER MISS YOUR MOMENT</span>
+      <h1>The latest from your crew.</h1>
+      <p className="lead">
+        Game changes, new players, and the moment your waitlist place opens.
+      </p>
+      <Alert>{error}</Alert>
+      {items.length ? (
+        <>
+          <ul className="notification-list">
+            {items.map((n) => (
+              <li key={n.notificationId}>
+                <button
+                  className={n.readAt ? "read" : "unread"}
+                  onClick={() => open(n)}
+                >
+                  <span className="notification-dot" />
+                  <div>
+                    <strong>{n.title}</strong>
+                    <p>{n.body}</p>
+                    <small>{dateOf(n.createdAt).toLocaleString()}</small>
+                  </div>
+                  <span aria-hidden="true">↗</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button className="secondary" disabled={busy} onClick={more}>
+            {busy ? "Loading…" : "Older updates"}
+          </button>
+        </>
+      ) : (
+        <Empty title="All quiet on the court">
+          Your updates will land here. You’ll hear when the game changes or your
+          place opens.
+        </Empty>
+      )}
+    </div>
+  );
 }
-createRoot(document.getElementById('root')).render(<App/>);
+function Payments() {
+  return (
+    <div className="form-page">
+      <span className="overline">SIMPLE SHARES. CLEAR EXPECTATIONS.</span>
+      <h1>Pay your way.</h1>
+      <p className="lead">
+        Your game’s venue share is shown in USD or LBP before you join.
+      </p>
+      <div className="panel">
+        <h2>At the venue</h2>
+        <p>
+          Settle your share directly with the host. If you claimed a
+          host-covered place, the host pays your share.
+        </p>
+        <div className="offer">
+          <h3>Online payments & host payouts</h3>
+          <p>
+            Online collection and cash-out are not enabled yet. There is no
+            in-app wallet balance or pending payout.
+          </p>
+          <p>
+            Provider activation is required before GameOn can accept funds or
+            offer payout methods in Lebanon.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+function Auth({ config, onLogin }) {
+  const reset = useRef(new URLSearchParams(location.search).get("reset"));
+  const [mode, setMode] = useState(reset.current ? "reset" : "login"),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [message, setMessage] = useState("");
+  useEffect(() => {
+    if (reset.current) history.replaceState({}, "", location.pathname);
+  }, []);
+  async function submit(e) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      if (mode === "forgot") {
+        const r = await api("/auth/forgot-password", "POST", {
+          email: f.get("email"),
+        });
+        setMessage(r.message);
+      } else if (mode === "reset") {
+        const r = await api("/auth/reset-password", "POST", {
+          token: reset.current,
+          password: f.get("password"),
+        });
+        reset.current = null;
+        setMode("login");
+        setMessage(r.message);
+      } else {
+        const r = await api(`/auth/${mode}`, "POST", {
+          email: f.get("email"),
+          password: f.get("password"),
+          displayName: f.get("name"),
+        });
+        if (mode === "register") {
+          setMode("login");
+          setMessage(r.message);
+        } else {
+          await refreshCsrf();
+          const me = await api("/auth/me");
+          onLogin(me);
+        }
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function change(m) {
+    setMode(m);
+    setError("");
+    setMessage("");
+  }
+  return (
+    <div className="auth-layout">
+      <div className="auth-story">
+        <span className="overline">THE BEST PLANS START WITH “GAME ON.”</span>
+        <h1>
+          Your people.
+          <br />
+          Your sport.
+          <br />
+          <em>Your next move.</em>
+        </h1>
+        <p>
+          From your first rally to your regular Sunday crew. Find your place in
+          the game.
+        </p>
+        <Court sport="Basketball" large />
+      </div>
+      <div className="panel auth-panel">
+        <span className="overline">WELCOME TO THE CREW</span>
+        <h2>
+          {mode === "register"
+            ? "Make yourself at home."
+            : mode === "forgot"
+              ? "Let’s get you back in."
+              : mode === "reset"
+                ? "A fresh start."
+                : "Good to see you."}
+        </h2>
+        <form className="stack" onSubmit={submit}>
+          {mode === "register" && (
+            <label>
+              Your name
+              <input
+                required
+                name="name"
+                maxLength="80"
+                autoComplete="nickname"
+              />
+            </label>
+          )}
+          {mode !== "reset" && (
+            <label>
+              Email
+              <input
+                required
+                name="email"
+                type="email"
+                maxLength="254"
+                autoComplete="email"
+              />
+            </label>
+          )}
+          {mode !== "forgot" && (
+            <label>
+              {mode === "reset" ? "New password" : "Password"}
+              <input
+                required
+                name="password"
+                type="password"
+                minLength={mode === "login" ? 1 : 12}
+                maxLength="128"
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+              />
+              {mode !== "login" && (
+                <small>At least 12 characters. Make it yours.</small>
+              )}
+            </label>
+          )}
+          <Alert>{error}</Alert>
+          {message && (
+            <p className="success" role="status">
+              {message}
+            </p>
+          )}
+          <button
+            className="primary full"
+            disabled={
+              busy || (mode === "forgot" && !config.passwordResetAvailable)
+            }
+          >
+            {busy
+              ? "One moment…"
+              : mode === "register"
+                ? "Join the crew ↗"
+                : mode === "forgot"
+                  ? "Send reset link"
+                  : mode === "reset"
+                    ? "Save new password"
+                    : "Let’s play ↗"}
+          </button>
+        </form>
+        {mode === "login" && (
+          <button className="text-link" onClick={() => change("forgot")}>
+            Forgot your password?
+          </button>
+        )}
+        {mode === "forgot" && !config.passwordResetAvailable && (
+          <p className="muted">
+            Email recovery is not available yet. Contact the organizer for help.
+          </p>
+        )}
+        <div className="auth-switch">
+          {mode === "login" ? (
+            <>
+              New around here?{" "}
+              <button className="text-link" onClick={() => change("register")}>
+                Create an account
+              </button>
+            </>
+          ) : (
+            <button className="text-link" onClick={() => change("login")}>
+              Back to sign in
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function App() {
+  const [page, setPage] = useState(
+      new URLSearchParams(location.search).has("reset") ? "auth" : "discover",
+    ),
+    [selected, setSelected] = useState(null),
+    [user, setUser] = useState(null),
+    [authReady, setAuthReady] = useState(false);
+  const [lookups, setLookups] = useState({ sports: [], venues: [] }),
+    [config, setConfig] = useState({}),
+    [error, setError] = useState(""),
+    [toast, setToast] = useState(""),
+    [revision, setRevision] = useState(0),
+    [notifications, setNotifications] = useState(null);
+  const toastTimer = useRef();
+  function notify(text) {
+    clearTimeout(toastTimer.current);
+    setToast(text);
+    toastTimer.current = setTimeout(() => setToast(""), 6500);
+  }
+  useEffect(() => {
+    const c = new AbortController();
+    Promise.all([
+      api("/lookups", "GET", undefined, { signal: c.signal }),
+      api("/config", "GET", undefined, { signal: c.signal }),
+    ])
+      .then(([l, cfg]) => {
+        setLookups(l);
+        setConfig(cfg);
+      })
+      .catch((e) => {
+        if (e.name !== "AbortError") setError(e.message);
+      });
+    api("/auth/me", "GET", undefined, { signal: c.signal })
+      .then(setUser)
+      .catch(() => {})
+      .finally(() => setAuthReady(true));
+    return () => {
+      c.abort();
+      clearTimeout(toastTimer.current);
+    };
+  }, []);
+  async function refreshInbox() {
+    const n = await api("/me/notifications");
+    setNotifications(n);
+  }
+  useEffect(() => {
+    if (!user) {
+      setNotifications(null);
+      return;
+    }
+    let stopped = false,
+      controller;
+    async function poll() {
+      if (document.hidden) return;
+      controller = new AbortController();
+      try {
+        const n = await api("/me/notifications", "GET", undefined, {
+          signal: controller.signal,
+        });
+        if (!stopped) setNotifications(n);
+      } catch (e) {
+        if (!stopped && e.status === 401) {
+          setUser(null);
+          setPage("auth");
+          await refreshCsrf().catch(() => {});
+          notify("Your session ended. Please sign in again.");
+        }
+      }
+    }
+    poll();
+    const timer = setInterval(poll, 30000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      stopped = true;
+      controller?.abort();
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [user?.userId]);
+  function navigate(next) {
+    if (["host", "mine", "profile", "inbox"].includes(next) && !user)
+      next = "auth";
+    setPage(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function select(id) {
+    setSelected(id);
+    navigate("details");
+  }
+  async function logout() {
+    try {
+      await api("/auth/logout", "POST");
+      await refreshCsrf();
+      setUser(null);
+      navigate("discover");
+      notify("Signed out. See you next game.");
+    } catch (e) {
+      notify(e.message);
+    }
+  }
+  const links = [
+    ["discover", "Discover"],
+    ["mine", "My games"],
+    ["inbox", "Inbox"],
+    ["profile", "My profile"],
+  ];
+  return (
+    <>
+      <a className="skip" href="#main">
+        Skip to content
+      </a>
+      <header className="site-header">
+        <button className="brand" onClick={() => navigate("discover")}>
+          <span className="brand-icon">
+            <Mark name="pin" />
+          </span>
+          game<span>on</span>
+          <i />
+        </button>
+        <nav aria-label="Main navigation">
+          {links.map(([key, label]) => (
+            <button
+              key={key}
+              className={page === key ? "active" : ""}
+              onClick={() => navigate(key)}
+            >
+              <Mark name={key === "mine" ? "games" : key} />
+              {label}
+              {key === "inbox" && notifications?.unreadCount > 0 && (
+                <span
+                  className="badge"
+                  aria-label={`${notifications.unreadCount} unread notifications`}
+                >
+                  {Math.min(notifications.unreadCount, 99)}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <div className="header-actions">
+          <button className="primary small" onClick={() => navigate("host")}>
+            + Host a game
+          </button>
+          {authReady &&
+            (user ? (
+              <button className="user-button" onClick={logout} title="Sign out">
+                <span className="avatar small">{user.name[0]}</span>
+                <span className="signout">Sign out</span>
+              </button>
+            ) : (
+              <button className="text-link" onClick={() => navigate("auth")}>
+                Sign in ↗
+              </button>
+            ))}
+        </div>
+      </header>
+      <main id="main">
+        <Alert>{error}</Alert>
+        {!authReady ? (
+          <Loading />
+        ) : (
+          <>
+            {page === "discover" && (
+              <Feed
+                lookups={lookups}
+                user={user}
+                select={select}
+                navigate={navigate}
+                revision={revision}
+              />
+            )}
+            {page === "details" && (
+              <Details
+                key={selected}
+                id={selected}
+                user={user}
+                config={config}
+                select={select}
+                navigate={navigate}
+                lookups={lookups}
+                notify={notify}
+              />
+            )}
+            {page === "host" && user && (
+              <GameForm
+                lookups={lookups}
+                onBack={() => navigate("discover")}
+                onSaved={(id) => {
+                  notify("Your game is live. Time to find your crew.");
+                  select(id);
+                }}
+              />
+            )}{" "}
+            {page === "mine" && user && <MyGames user={user} select={select} />}{" "}
+            {page === "profile" && user && (
+              <Profile
+                lookups={lookups}
+                onSaved={(name) => {
+                  setUser({ ...user, name });
+                  setRevision((v) => v + 1);
+                  notify("Preferences saved. Your feed is now more you.");
+                  navigate("discover");
+                }}
+              />
+            )}{" "}
+            {page === "inbox" && user && (
+              <Inbox
+                notifications={notifications}
+                select={select}
+                refresh={refreshInbox}
+              />
+            )}{" "}
+            {page === "payments" && <Payments />}
+            {page === "auth" && (
+              <Auth
+                config={config}
+                onLogin={(me) => {
+                  setUser(me);
+                  setRevision((v) => v + 1);
+                  navigate("discover");
+                  notify(`Welcome back, ${me.name.split(" ")[0]}.`);
+                }}
+              />
+            )}
+          </>
+        )}
+      </main>
+      <footer>
+        <button className="brand" onClick={() => navigate("discover")}>
+          game<span>on</span>
+          <i />
+        </button>
+        <p>A little less online. A lot more on court.</p>
+        <button className="text-link" onClick={() => navigate("payments")}>
+          Payments & venue shares ↗
+        </button>
+        <span>Made for the way Lebanon plays.</span>
+      </footer>
+      {toast && (
+        <div className="toast" role="status">
+          <Mark name="check" />
+          {toast}
+          <button
+            aria-label="Dismiss notification"
+            onClick={() => setToast("")}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+createRoot(document.getElementById("root")).render(<App />);

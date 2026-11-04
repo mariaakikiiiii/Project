@@ -38,3 +38,20 @@ status, body = call('/auth/login', 'POST', {'email': 'bad', 'password': 'x'},
                     {'X-CSRF-TOKEN': json.loads(call('/csrf')[1])['token']})
 assert status == 400 and json.loads(body)['error'] == 'Invalid credentials.'
 print('PASS: TLS verification, CSRF issuance, unauthenticated access denial, missing-token rejection, login input validation.')
+
+# Platform upgrade: protected routes stay inaccessible to anonymous callers.
+for path, method in [("/me/profile", "GET"), ("/me/notifications", "GET"),
+                     ("/games/1", "PUT"), ("/games/1/cancel", "POST"),
+                     ("/games/1/sponsored-place", "POST"),
+                     ("/me/notifications/1/read", "POST")]:
+    assert call(path, method, {} if method != "GET" else None)[0] == 401, path
+status, body = call("/config")
+assert status == 200
+configuration = json.loads(body)
+assert configuration["onlinePaymentsAvailable"] is False
+assert configuration["payoutAvailable"] is False
+assert "apiKey" not in configuration and "connectionString" not in configuration
+status, body = call("/auth/reset-password", "POST", {"token": "invalid", "password": "short"},
+                    {"X-CSRF-TOKEN": json.loads(call("/csrf")[1])["token"]})
+assert status == 400
+print("PASS: platform route authorization, public configuration boundaries and reset input validation.")

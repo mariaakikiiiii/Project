@@ -1,0 +1,24 @@
+# Example production same-origin reverse proxy; adapt certificate and static paths.
+# Serve a built React bundle. Configure the trusted backend/TLS/key storage separately.
+server {
+    listen 443 ssl;
+    server_name gameon.example;
+    ssl_certificate /etc/gameon/tls/fullchain.pem;
+    ssl_certificate_key /etc/gameon/tls/privkey.pem;
+    root /var/www/gameon;
+    client_max_body_size 16k;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src https://www.google.com https://maps.google.com; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
+    location /api/ {
+        proxy_pass https://localhost:7043;
+        proxy_ssl_verify on;
+        proxy_ssl_server_name on;
+        proxy_ssl_name localhost;
+        proxy_ssl_trusted_certificate /etc/gameon/tls/backend-ca.pem;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+    location / { try_files $uri /index.html; }
+}
