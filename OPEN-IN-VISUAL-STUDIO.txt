@@ -1,0 +1,13 @@
+GameOn — Open in Visual Studio
+
+1. Extract the ZIP.
+2. Install Visual Studio 2022 (17.8 or newer) with the ASP.NET and web development workload and .NET 8 SDK.
+3. Double-click GameOn.sln. The backend project is included.
+4. Follow README.md to prepare SQL Server and securely configure ConnectionStrings:GameOn. Never put database passwords in source files.
+5. Run the API using HTTPS on port 7043 as described in README.md.
+6. For React, open a terminal in frontend and run npm ci, then npm run dev (Node.js 22+).
+
+The SQL scripts are in database/. Frontend source is in frontend/.
+Builds and security middleware smoke tests passed in the cloud. SQL Server and end-to-end database workflows have not yet been validated; see docs/validation.md.
+
+Generated dependencies and build output are omitted; npm and NuGet restore them.
