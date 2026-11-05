@@ -12,7 +12,7 @@ Set-Location "$env:USERPROFILE\source\repos\GameOn-Full"
 git pull --ff-only origin main
 ```
 
-3. Open `database/18-security-deposits.sql` in SSMS using your migration/Windows identity. Choose **Query → SQLCMD Mode**, clear any selection, and execute the **whole file**. Migration 16 must already be installed. The script selects `GameOn` explicitly, records version 18, and refuses a second application. Do not use `install-fresh.sql` on your existing database.
+3. Open `database/18-security-deposits.sql` in SSMS using your migration/Windows identity. The current file works in **ordinary SSMS mode**. Clear any selection and execute the **whole file**. If version 16 was recorded after errors, follow [the repair guide](REPAIR-16.md) first. Migration 16 must already be installed. The script selects `GameOn` explicitly, records version 18, and refuses a second application. Do not use `install-fresh.sql` on your existing database.
 4. Run `database/19-security-deposit-tests.sql` on a **disposable upgraded database copy**. The fixtures roll back and never call Whish. Earlier SQL test scripts target their original schema versions; they are not the acceptance suite for version 18.
 5. Restart the API with F5. Restart `npm run dev` from the frontend folder.
 

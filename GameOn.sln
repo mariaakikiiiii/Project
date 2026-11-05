@@ -28,6 +28,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{3E
 		database\14-sponsored-demo-seed.sql = database\14-sponsored-demo-seed.sql
 		database\15-commercial-tests.sql = database\15-commercial-tests.sql
 		database\16-location-manual-whish.sql = database\16-location-manual-whish.sql
+		database\16-repair-partial-install.sql = database\16-repair-partial-install.sql
 		database\17-location-payment-tests.sql = database\17-location-payment-tests.sql
 		database\18-security-deposits.sql = database\18-security-deposits.sql
 		database\19-security-deposit-tests.sql = database\19-security-deposit-tests.sql
@@ -67,6 +68,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Guides", "Guides", "{DB2CD8
 		docs\COMMERCIAL.md = docs\COMMERCIAL.md
 		docs\UPDATE-16.md = docs\UPDATE-16.md
 		docs\DEPOSITS.md = docs\DEPOSITS.md
+		docs\REPAIR-16.md = docs\REPAIR-16.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameOn.PaymentChecks", "tests\GameOn.PaymentChecks\GameOn.PaymentChecks.csproj", "{3BCF7649-7D26-429C-A95C-4C3F384D35BD}"

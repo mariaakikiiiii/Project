@@ -18,7 +18,7 @@ git pull --ff-only origin main
 
 If Git reports local changes, preserve/review them before pulling; do not reset your project or database.
 
-3. In SSMS connect with your Windows migration/admin identity. Open `database/16-location-manual-whish.sql`. Choose **Query → SQLCMD Mode**, clear any selected text, and execute the **whole file**. It explicitly selects `GameOn` and requires migrations 7, 9 and 13. Do not rerun older migrations or `install-fresh.sql` on this database. Version 16 refuses a second installation.
+3. In SSMS connect with your Windows migration/admin identity. Open `database/16-location-manual-whish.sql`. The current file works in **ordinary SSMS mode**. Clear any selected text and execute the **whole file**. If a failed attempt already recorded version 16, use [the repair guide](REPAIR-16.md) instead. It explicitly selects `GameOn` and requires migrations 7, 9 and 13. Do not rerun older migrations or `install-fresh.sql` on this database. Version 16 refuses a second installation.
 4. On a **disposable database copy**, run `database/17-location-payment-tests.sql` (and existing tests). The new test fixtures roll back. This environment syntax-checked the scripts but could not run a SQL Server engine.
 5. Restart the API with F5. In Developer PowerShell:
 

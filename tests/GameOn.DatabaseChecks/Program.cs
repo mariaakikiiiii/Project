@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
@@ -13,7 +14,17 @@ if (args.Contains("--syntax"))
         using var reader = new StringReader(sql);
         new TSql160Parser(true).Parse(reader, out var errors);
         foreach (var error in errors) { Console.WriteLine($"{file}:{error.Line}: {error.Message}"); failures++; }
-        if (errors.Count == 0) Console.WriteLine($"PASS syntax only: {Path.GetFileName(file)}");
+        // Constant dynamic DDL is compiled in its own scope by the migrations.
+        // Parse its actual decoded text too; parsing only the wrapper misses errors inside strings.
+        var nestedFailures = 0;
+        foreach (Match match in Regex.Matches(sql, @"\bEXEC\s*\(\s*N'((?:[^']|'')*)'\s*\)", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        {
+            var body = match.Groups[1].Value.Replace("''", "'");
+            using var nestedReader = new StringReader(body);
+            new TSql160Parser(true).Parse(nestedReader, out var nestedErrors);
+            foreach (var error in nestedErrors) { Console.WriteLine($"{file}: embedded SQL line {error.Line}: {error.Message}"); failures++; nestedFailures++; }
+        }
+        if (errors.Count == 0 && nestedFailures == 0) Console.WriteLine($"PASS syntax only (including constant dynamic SQL): {Path.GetFileName(file)}");
     }
     return failures == 0 ? 0 : 1;
 }

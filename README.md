@@ -1,5 +1,7 @@
 # Latest update
 
+**Migration errors near `:` or missing latitude/payment columns despite version 16 being recorded?** Follow [the guarded repair guide](docs/REPAIR-16.md). Do not delete version rows or rerun the older scripts.
+
 Venue direct contact and commitment deposits: follow [the migration 18 instructions](docs/DEPOSITS.md) after migration 16. New events require a $1 deposit; new booking shares use a 5% service fee. Transfer references remain pending until an operator verifies received funds. Existing bookings/invoices retain their financial snapshots. [Dark/light themes and Google Maps setup](docs/UPDATE-16.md) remain available.
 
 # GameOn

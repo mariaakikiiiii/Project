@@ -77,3 +77,8 @@ Not executed: live migration 13, actual SQL cash/idempotency transitions, real c
 - Actual API HTTPS middleware smoke passed for deposit quote/checkout, reference submission, history/review and operator venue-management authentication boundaries, and public 5% rate configuration. Authenticated owner/role checks require the live database tests; middleware smoke alone does not prove them.
 - All SQL scripts passed Microsoft ScriptDom syntax parsing. SQL Server is unavailable here: migration 18 and acceptance script 19 are **not engine-executed**. The guarded disposable-database C# runner now includes deposit bypass rejection, two blocked authorization connections competing for a final spot, one held/one refund-review result, capacity preservation and full-event confirmation. These engine tests are supplied and compiled, not claimed as executed.
 - Manual Whish only: no real transfer, authorization, refund, call or no-show forfeiture was performed. Operators must verify actual bank/Whish/attendance evidence before recording an action.
+
+
+## Incomplete 13/16 migration repair
+
+A user reported version 16 recorded with missing venue columns, missing manual-transfer tables and no Payments columns visible. Added a guarded, data-preserving repair for incomplete 13/16 schemas. Rebuilt current 16/18 migrations as ordinary-SSMS single-transaction wrappers with constant DDL/module compilation scopes, avoiding same-batch new-column binding and SQLCMD continuation hazards. The syntax checker now also parses decoded constant dynamic SQL, rather than only its string wrapper. Repair refuses recorded/partial deposit schemas. SQL Server is still unavailable here: grammar validation is not an engine execution or rollback proof.
