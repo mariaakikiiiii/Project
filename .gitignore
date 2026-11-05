@@ -6,3 +6,5 @@ backend/obj/
 .env.*
 *.pfx
 *.pem
+tests/**/bin/
+tests/**/obj/

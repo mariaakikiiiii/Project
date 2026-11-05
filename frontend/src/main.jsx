@@ -10,6 +10,9 @@ import {
   mapQuery,
 } from "./domain";
 import "./style.css";
+import CategoryTabs from "./components/CategoryTabs";
+import GameForm from "./components/EventWizard";
+import PaymentSelector from "./components/PaymentSelector";
 
 function Mark({ name }) {
   const paths = {
@@ -80,7 +83,7 @@ function Court({ sport, large = false }) {
   return (
     <div
       aria-hidden="true"
-      className={`court ${sport?.toLowerCase()} ${large ? "large" : ""}`}
+      className={`court ${sport?.startsWith("Football") ? "football" : sport?.includes("Tennis") || ["Padel", "Badminton", "Squash"].includes(sport) ? "padel" : sport === "Swimming" ? "swimming" : ["Paintball", "Airsoft", "Archery Tag"].includes(sport) ? "tactical" : sport?.includes("Laser") || sport?.includes("iCombat") ? "laser" : sport === "Escape Rooms" ? "escape" : sport === "Go-Karting" ? "karting" : sport === "Bowling" ? "bowling" : "basketball"} ${large ? "large" : ""}`}
     >
       <div className="court-lines">
         <i />
@@ -88,7 +91,7 @@ function Court({ sport, large = false }) {
         <em />
       </div>
       <span>
-        {sport === "Football"
+        {sport?.startsWith("Football")
           ? "90 MINUTES. NEW FRIENDS."
           : sport === "Padel"
             ? "GOOD RALLIES. BETTER COMPANY."
@@ -140,9 +143,9 @@ function GameCard({ game: g, select, user }) {
           <p className="match">
             ✦{" "}
             {g.matchesSport && g.matchesArea
-              ? "Your sport. Your neighborhood."
+              ? "Your experience. Your neighborhood."
               : g.matchesSport
-                ? "Matches your favorite sport"
+                ? "Matches your favorites"
                 : "In your preferred area"}
           </p>
         )}
@@ -170,10 +173,10 @@ function GameCard({ game: g, select, user }) {
               ? "Cancelled"
               : g.status === "Waitlisted"
                 ? `Waitlist #${g.queuePosition}`
-                : g.status ||
+                : (g.status === "Joined" ? "Confirmed" : g.status) ||
                   (g.capacity === g.playerCount
-                    ? "Waitlist open"
-                    : `${g.capacity - g.playerCount} places left`)}
+                    ? "FULL — Join Waitlist"
+                    : `${g.capacity - g.playerCount} spots left`)}
           </span>
           {user?.userId === g.hostUserId && (
             <span className="host-label">You host</span>
@@ -187,6 +190,8 @@ function GameCard({ game: g, select, user }) {
 function Feed({ lookups, user, select, navigate, revision }) {
   const [filters, setFilters] = useState({
     sportId: "",
+    category: "",
+    openOnly: false,
     area: "",
     date: "",
     freeOnly: false,
@@ -210,6 +215,18 @@ function Feed({ lookups, user, select, navigate, revision }) {
       ).toString(),
     );
   }
+  function category(slug) {
+    const next = { ...filters, category: slug, sportId: "" };
+    setFilters(next);
+    setQuery(
+      new URLSearchParams(
+        Object.entries(next).filter(([, v]) => v !== "" && v !== false),
+      ).toString(),
+    );
+  }
+  const visibleTypes = lookups.sports.filter(
+    (t) => !filters.category || t.categorySlug === filters.category,
+  );
   return (
     <>
       <section className="hero">
@@ -233,7 +250,8 @@ function Feed({ lookups, user, select, navigate, revision }) {
             )}
           </h1>
           <p>
-            Pick your sport. Find your people. There’s always room for one more.
+            From pickup matches to escape-room missions. Find your people. Make
+            a better plan.
           </p>
           <div className="hero-actions">
             <button
@@ -296,14 +314,29 @@ function Feed({ lookups, user, select, navigate, revision }) {
           </span>
         )}
       </div>
-      <div className="sport-chips" aria-label="Filter by sport">
+      <CategoryTabs value={filters.category} onChange={category} />
+      <label className="mobile-type-select">
+        Sport or activity
+        <select value={filters.sportId} onChange={(e) => sport(e.target.value)}>
+          <option value="">All types</option>
+          {visibleTypes.map((t) => (
+            <option key={t.sportId} value={t.sportId}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div
+        className="sport-chips type-chips"
+        aria-label="Filter by sport or activity"
+      >
         <button
           className={!filters.sportId ? "selected" : ""}
           onClick={() => sport("")}
         >
-          All games
+          All types
         </button>
-        {lookups.sports.map((s) => (
+        {visibleTypes.map((s) => (
           <button
             key={s.sportId}
             className={String(s.sportId) === filters.sportId ? "selected" : ""}
@@ -345,7 +378,17 @@ function Feed({ lookups, user, select, navigate, revision }) {
           />{" "}
           Free or host-covered
         </label>
-        <button className="primary">Find games ↗</button>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={filters.openOnly}
+            onChange={(e) =>
+              setFilters({ ...filters, openOnly: e.target.checked })
+            }
+          />{" "}
+          Open spots only
+        </label>
+        <button className="primary">Find events ↗</button>
       </form>
       <Alert>{error}</Alert>
       {loading ? (
@@ -362,7 +405,7 @@ function Feed({ lookups, user, select, navigate, revision }) {
             title="Your next game starts with you"
             action={
               <button className="primary" onClick={() => navigate("host")}>
-                Host a game +
+                Host an event +
               </button>
             }
           >
@@ -393,6 +436,7 @@ function Feed({ lookups, user, select, navigate, revision }) {
 function Details({ id, user, config, select, navigate, lookups, notify }) {
   const [version, setVersion] = useState(0),
     [busy, setBusy] = useState(false),
+    [paymentMethod, setPaymentMethod] = useState("Cash"),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(false),
     [confirmCancel, setConfirmCancel] = useState(false);
@@ -406,7 +450,11 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
     setBusy(true);
     setError("");
     try {
-      const result = await api(`/games/${id}${path}`, method);
+      const result = await api(
+        `/games/${id}${path}`,
+        method,
+        path === "/join" ? { paymentMethod } : undefined,
+      );
       notify(result.message || message);
       setVersion((v) => v + 1);
       setConfirmCancel(false);
@@ -422,7 +470,8 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
   const g = data.game,
     host = user?.userId === g.hostUserId,
     member = data.roster.some((p) => p.userId === user?.userId),
-    covered = availableCovered(g);
+    covered = availableCovered(g),
+    queued = data.membership?.status === "Waitlisted";
   if (editing)
     return (
       <GameForm
@@ -446,7 +495,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
         <Court sport={g.sport} large />
         <div>
           <span className="overline">
-            {g.sport.toUpperCase()} · {g.area.toUpperCase()}
+            {g.categoryName} · {g.sport.toUpperCase()} · {g.area.toUpperCase()}
           </span>
           <h1>
             {g.sport} at {g.venue}
@@ -578,7 +627,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                   {covered} host-covered {covered === 1 ? "place" : "places"}{" "}
                   available. The host covers your venue share.
                 </p>
-                {!member && (
+                {!member && !queued && (
                   <button
                     className="primary full"
                     disabled={busy || !playable(g)}
@@ -600,9 +649,29 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
               left · {g.playerCount} already in
             </p>
             <Alert>{error}</Alert>
+            {data.membership && (
+              <p className="membership-status" role="status">
+                {queued
+                  ? `Waitlisted · position #${data.membership.queuePosition}`
+                  : "Your place is confirmed"}
+                {data.membership.paymentMethod === "Cash"
+                  ? " · cash at venue"
+                  : ""}
+              </p>
+            )}
+            {playable(g) &&
+              !member &&
+              !queued &&
+              Number(g.costPerPlayer) > 0 && (
+                <PaymentSelector
+                  value={paymentMethod}
+                  onChange={setPaymentMethod}
+                  disabled={busy}
+                />
+              )}
             {playable(g) ? (
               <>
-                {!member && (
+                {!member && !queued && (
                   <button
                     className="primary full"
                     disabled={busy}
@@ -620,12 +689,12 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                       ? "One moment…"
                       : user
                         ? g.playerCount >= g.capacity
-                          ? "Join the waitlist"
-                          : "Join this game"
+                          ? "FULL — Join Waitlist"
+                          : "Join this event"
                         : "Sign in to join"}
                   </button>
                 )}
-                {user && (
+                {user && (member || queued) && (
                   <button
                     className="secondary full"
                     disabled={busy}
@@ -704,169 +773,6 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
     </>
   );
 }
-function GameForm({ lookups, existing, onSaved, onBack }) {
-  const [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function submit(e) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    setBusy(true);
-    setError("");
-    try {
-      const body = {
-        sportId: Number(f.get("sport")),
-        venueId: Number(f.get("venue")),
-        startsAt: new Date(f.get("start")).toISOString(),
-        capacity: Number(f.get("capacity")),
-        description: f.get("description"),
-        costPerPlayer: Number(f.get("price")),
-        currency: f.get("currency"),
-        sponsoredSlots: Number(f.get("sponsored")),
-        revision: existing?.revision,
-      };
-      const result = await api(
-        existing ? `/games/${existing.gameId}` : "/games",
-        existing ? "PUT" : "POST",
-        body,
-      );
-      onSaved(existing ? existing.gameId : result.gameId);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="form-page">
-      <button className="text-link" onClick={onBack}>
-        ← Back
-      </button>
-      <span className="overline">BRING YOUR PEOPLE TOGETHER</span>
-      <h1>
-        {existing ? "Make it a better game." : "Your game. Your invitation."}
-      </h1>
-      <p className="lead">
-        A full court starts with one person saying “let’s play.”
-      </p>
-      <form className="panel form-grid" onSubmit={submit}>
-        {!existing && (
-          <>
-            <label>
-              What are we playing?
-              <select name="sport" required defaultValue="">
-                <option value="" disabled>
-                  Choose a sport
-                </option>
-                {lookups.sports.map((s) => (
-                  <option key={s.sportId} value={s.sportId}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Where’s the game?
-              <select required name="venue" defaultValue="">
-                <option value="" disabled>
-                  Choose a venue
-                </option>
-                {lookups.venues.map((v) => (
-                  <option key={v.venueId} value={v.venueId}>
-                    {v.name} · {v.area}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-        <label>
-          Date & time (your local time)
-          <input
-            required
-            type="datetime-local"
-            name="start"
-            defaultValue={existing ? localInput(existing.startsAt) : ""}
-          />
-        </label>
-        <label>
-          Total places, including you
-          <input
-            required
-            type="number"
-            min="2"
-            max="100"
-            name="capacity"
-            defaultValue={existing?.capacity || 10}
-          />
-        </label>
-        <label>
-          Venue share per player
-          <input
-            required
-            type="number"
-            name="price"
-            min="0"
-            max="99999999.99"
-            step="0.01"
-            defaultValue={existing?.costPerPlayer ?? 0}
-          />
-        </label>
-        <label>
-          Currency
-          <select name="currency" defaultValue={existing?.currency || "USD"}>
-            <option>USD</option>
-            <option>LBP</option>
-          </select>
-        </label>
-        <div className="form-wide offer">
-          <span>✦ MAKE SOMEONE’S DAY</span>
-          <h3>One more player. On you.</h3>
-          <p>
-            Choose how many players you’ll cover the venue fee for. This is your
-            commitment to pay their share at the venue; the app does not
-            transfer money.
-          </p>
-          <label>
-            Host-covered places
-            <input
-              required
-              type="number"
-              min="0"
-              max="99"
-              name="sponsored"
-              defaultValue={existing?.sponsoredSlots || 0}
-            />
-          </label>
-        </div>
-        <label className="form-wide">
-          Set the vibe
-          <textarea
-            name="description"
-            maxLength="1000"
-            rows="4"
-            defaultValue={existing?.description || ""}
-            placeholder="Skill level, what to bring, where to meet… make everyone feel welcome."
-          />
-        </label>
-        <div className="form-wide">
-          <Alert>{error}</Alert>
-          <p className="muted">
-            {existing
-              ? "Price cannot change once other players join. Confirmed places and existing sponsorships must fit the new capacity."
-              : "You are automatically enrolled as host. No online payment is collected."}
-          </p>
-          <button className="primary" disabled={busy}>
-            {busy
-              ? "Saving…"
-              : existing
-                ? "Save & notify the crew"
-                : "Make this game happen ↗"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 function MyGames({ user, select }) {
   const [tab, setTab] = useState("upcoming");
   const { data, error, loading } = useResource("/me/games");
@@ -874,9 +780,11 @@ function MyGames({ user, select }) {
     data?.filter((g) =>
       tab === "hosting"
         ? g.hostUserId === user.userId
-        : tab === "past"
-          ? !playable(g)
-          : playable(g),
+        : tab === "waitlist"
+          ? playable(g) && g.status === "Waitlisted"
+          : tab === "past"
+            ? !playable(g)
+            : playable(g),
     ) || [];
   return (
     <>
@@ -886,7 +794,7 @@ function MyGames({ user, select }) {
         Confirmed places, waiting lists, and the games you bring to life.
       </p>
       <div className="sport-chips">
-        {["upcoming", "hosting", "past"].map((t) => (
+        {["upcoming", "waitlist", "hosting", "past"].map((t) => (
           <button
             key={t}
             className={tab === t ? "selected" : ""}
@@ -944,8 +852,8 @@ function Profile({ lookups, onSaved }) {
       <span className="overline">MORE YOU. BETTER GAMES.</span>
       <h1>What’s your game?</h1>
       <p className="lead">
-        Your favorite sports and neighborhood shape what you see when you sign
-        in.
+        Your favorite sports, activities and neighborhood shape what you see
+        when you sign in.
       </p>
       <form className="panel form-grid" onSubmit={submit}>
         <label>
@@ -979,7 +887,7 @@ function Profile({ lookups, onSaved }) {
           </select>
         </label>
         <fieldset className="form-wide">
-          <legend>Your favorite sports</legend>
+          <legend>Your favorite sports & activities</legend>
           <div className="preference-sports">
             {lookups.sports.map((s) => (
               <label className="checkbox" key={s.sportId}>
@@ -1088,31 +996,34 @@ function Inbox({ notifications, select, refresh }) {
   );
 }
 function Payments() {
+  const [choice, setChoice] = useState("Cash");
   return (
     <div className="form-page">
-      <span className="overline">SIMPLE SHARES. CLEAR EXPECTATIONS.</span>
-      <h1>Pay your way.</h1>
+      <span className="overline">YOUR PLAN. YOUR PAYMENT CHOICE.</span>
+      <h1>Clear shares. Better plans.</h1>
       <p className="lead">
-        Your game’s venue share is shown in USD or LBP before you join.
+        Prices are shown in USD or LBP before you reserve. No currency
+        conversion is performed.
       </p>
-      <div className="panel">
-        <h2>At the venue</h2>
+      <section className="panel">
+        <h2>Cash or Whish</h2>
+        <PaymentSelector value={choice} onChange={setChoice} />
         <p>
-          Settle your share directly with the host. If you claimed a
-          host-covered place, the host pays your share.
+          Cash is settled in person with the host. A host-covered place means
+          your host pays your venue share.
         </p>
         <div className="offer">
-          <h3>Online payments & host payouts</h3>
+          <h3>Whish Money online checkout</h3>
           <p>
-            Online collection and cash-out are not enabled yet. There is no
-            in-app wallet balance or pending payout.
+            Whish is the planned online player-payment method. It is unavailable
+            until the merchant checkout API is connected and verified. Selecting
+            a method never marks an event as paid.
           </p>
           <p>
-            Provider activation is required before GameOn can accept funds or
-            offer payout methods in Lebanon.
+            GameOn does not collect your Whish password, PIN, or one-time codes.
           </p>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -1433,7 +1344,7 @@ function App() {
         </nav>
         <div className="header-actions">
           <button className="primary small" onClick={() => navigate("host")}>
-            + Host a game
+            + Host event
           </button>
           {authReady &&
             (user ? (
@@ -1480,7 +1391,7 @@ function App() {
                 lookups={lookups}
                 onBack={() => navigate("discover")}
                 onSaved={(id) => {
-                  notify("Your game is live. Time to find your crew.");
+                  notify("Your event is live. Time to find your crew.");
                   select(id);
                 }}
               />

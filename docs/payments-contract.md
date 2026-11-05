@@ -1,16 +1,22 @@
-# Payment integration boundary
+# Cash and Whish boundary
 
-Online money movement is intentionally disabled until the merchant provider is identified. The confirmed market is Lebanon. Venue shares can be denominated in USD or LBP; conversion is not performed. Host-covered places are a commitment by the host to settle a player's share at the venue, not a stored-value wallet or payout to the player.
+Confirmed scope: Lebanon, cash paid in person, Whish online player payments. Host cash-outs are not requested in this edition. The merchant supplied its base URLs and explicitly requested skipping/mocking payment execution to focus on the database and app. This release skips execution; it does not pretend a mock is a real transfer.
 
-Required provider information: legal merchant country, supported collection and payout currencies, hosted checkout API, webhook signing/versioning rules, sandbox endpoints, connected-recipient/KYC requirements, refunds, chargebacks, payout limits and payout eligibility in Lebanon. Provider names alone do not establish availability or approval.
+## Configuration
 
-Implementation contract after provider selection:
+- Sandbox: https://lb.sandbox.whish.money/itel-service/api/
+- Production: https://whish.money/itel-service/api/
+- Server-only keys: Whish:ChannelId, Whish:SecretKey, Whish:WebsiteUrl.
+- Whish:Environment selects Sandbox (default) or Production. Root URLs are fixed; arbitrary remote hosts cannot be supplied by clients.
 
-- Browser requests an order using GameId, never a client-controlled amount or host account id. Server verifies current membership and sponsorship, derives the authoritative currency/share and persists an idempotent order.
-- Card/bank credentials remain in the provider-hosted checkout/onboarding. Store only opaque provider references and masked display information authorized by the provider.
-- A success redirect never credits an account. Verify webhook signatures against the raw request bytes, enforce timestamp/replay rules and record each unique event id transactionally before applying state changes.
-- Use immutable, currency-specific balanced ledger entries. Settlement, available funds, refunds and disputes remain distinct. Never add USD and LBP balances together.
-- Payouts require a verified provider recipient and provider-confirmed available funds. A transaction reserves the balance before calling the provider with a stable idempotency key. Reconcile callbacks and retries without double payout. Cancellation/refund races must be tested in the provider sandbox.
-- Provider credentials and webhook secrets use secure server configuration. Disable collection and payout endpoints until configuration and sandbox tests succeed. Real charges/payouts require merchant approval and explicit operational activation.
+The named server HttpClient and IWhishGateway boundary are provided. WhishMerchantConfiguration records the required settings without exposing values. No authentication header name, operation path, signature scheme or response schema is invented from the base URLs. The current gateway is unavailable even if credentials are configured; there is no switch that enables unsupported payment execution.
 
-No payment-provider API has been invented or called by this upgrade.
+## Current behavior
+
+Cash is persisted on participation/waitlist records and carried through promotion. It means the player intends to settle at the venue, not that payment was received. Host-covered places waive the player's venue share by agreement with the host.
+
+Whish is visible but unavailable. Positive-price Whish joins are also rejected in the SQL transaction, preventing direct API calls from bypassing the UI. No funds, wallet balances, receipts, refunds or provider statuses are fabricated. The app never asks for a player's Whish password, PIN or one-time code.
+
+## Work required before real checkout
+
+Obtain the private merchant operation paths, authentication/signing rules, hosted checkout/status schemas, sandbox test cases, supported currencies and webhook verification contract. Derive amounts from the locked event and actual membership, never a client-controlled amount. Persist unique orders and provider references with idempotent reconciliation. A browser success redirect must not mark an order paid: verify status/signature on the server. Handle cancellation, timeout, duplicate callbacks and refunds in the sandbox before operational activation. Keep USD and LBP amounts separate and do not perform implicit conversion. Merchant credentials belong in User Secrets or production secure injection, never source or chat.

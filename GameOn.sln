@@ -1,9 +1,53 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameOn.Api", "backend\GameOn.Api.csproj", "{CDF641F4-C8DF-4D76-9FF3-BC6B4FDE36F8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{54805E9A-F1B4-438A-A077-38559C273BAA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameOn.DatabaseChecks", "tests\GameOn.DatabaseChecks\GameOn.DatabaseChecks.csproj", "{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{3EB63784-48EC-51A6-9002-D1553FBE8B6E}"
+	ProjectSection(SolutionItems) = preProject
+		database\01-schema.sql = database\01-schema.sql
+		database\02-procedures.sql = database\02-procedures.sql
+		database\03-seed.sql = database\03-seed.sql
+		database\04-security.sql = database\04-security.sql
+		database\05-tests.sql = database\05-tests.sql
+		database\06-performance.sql = database\06-performance.sql
+		database\07-platform-upgrade.sql = database\07-platform-upgrade.sql
+		database\08-platform-tests.sql = database\08-platform-tests.sql
+		database\09-categories-and-events.sql = database\09-categories-and-events.sql
+		database\10-user-analytics-seed.sql = database\10-user-analytics-seed.sql
+		database\11-analytics-performance.sql = database\11-analytics-performance.sql
+		database\12-category-event-tests.sql = database\12-category-event-tests.sql
+		database\install-fresh.sql = database\install-fresh.sql
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Frontend", "{A84E09AF-B36B-5094-B1F1-2EC930A27B35}"
+	ProjectSection(SolutionItems) = preProject
+		frontend\package.json = frontend\package.json
+		frontend\index.html = frontend\index.html
+		frontend\vite.config.js = frontend\vite.config.js
+		frontend\src\api.js = frontend\src\api.js
+		frontend\src\components\CategoryTabs.jsx = frontend\src\components\CategoryTabs.jsx
+		frontend\src\components\EventWizard.jsx = frontend\src\components\EventWizard.jsx
+		frontend\src\components\PaymentSelector.jsx = frontend\src\components\PaymentSelector.jsx
+		frontend\src\domain.js = frontend\src\domain.js
+		frontend\src\main.jsx = frontend\src\main.jsx
+		frontend\src\style.css = frontend\src\style.css
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Guides", "Guides", "{DB2CD83F-2E10-54AE-A283-162E07BC4977}"
+	ProjectSection(SolutionItems) = preProject
+		README.md = README.md
+		docs\GIN401.md = docs\GIN401.md
+		docs\UPGRADE.md = docs\UPGRADE.md
+		docs\validation.md = docs\validation.md
+		docs\payments-contract.md = docs\payments-contract.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,5 +62,12 @@ Global
 		{CDF641F4-C8DF-4D76-9FF3-BC6B4FDE36F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CDF641F4-C8DF-4D76-9FF3-BC6B4FDE36F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CDF641F4-C8DF-4D76-9FF3-BC6B4FDE36F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B62FE2A8-E2E3-49E4-82ED-17C1802E55E9} = {54805E9A-F1B4-438A-A077-38559C273BAA}
 	EndGlobalSection
 EndGlobal

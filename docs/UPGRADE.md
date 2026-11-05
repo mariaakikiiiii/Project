@@ -1,5 +1,7 @@
 # GameOn platform upgrade — existing Windows installation
 
+**Latest sports + activities edition:** after version 7, also install `09-categories-and-events.sql` in SQLCMD Mode. Then run `10-user-analytics-seed.sql` for the GIN401 analytics fixture. If version 7 is already installed, skip it. See [GIN401.md](GIN401.md) for the final schema, 17 event types and concurrency runner.
+
 This upgrade adds the redesigned responsive interface, profiles, saved sport/area preferences, personalized discovery, host editing/cancellation, host-covered venue places, an in-app notification inbox, map links/API embedding, and password recovery infrastructure. It preserves your users, games and audit rows.
 
 ## 1. Update the project
@@ -14,7 +16,7 @@ Connect in SSMS with Windows Authentication (your migration/admin identity).
 2. Open database/07-platform-upgrade.sql.
 3. Select GameOn in the database dropdown.
 4. Enable **Query > SQLCMD Mode**. This is required by `:ON ERROR EXIT`; it stops immediately on a failed batch and closes the connection, rolling back the upgrade transaction. Do not remove that command or execute individual selected portions.
-5. Execute the whole file once. It installs version 7 and keeps the old data.
+5. Execute the whole file once. It installs version 7 and keeps the old data. If it was already installed, skip this file. Then execute 09-categories-and-events.sql in SQLCMD Mode before starting the latest app.
 6. Reconnect if needed. Disable SQLCMD Mode for regular queries.
 7. Execute database/08-platform-tests.sql against a disposable upgraded copy. Its fixtures roll back.
 
@@ -84,9 +86,9 @@ Production must persist Data Protection keys securely and share them among insta
 
 ## 8. Payments and cash-out — pending provider integration
 
-Lebanon and host-covered venue fees were confirmed. A merchant account exists, but its provider name/API documentation are still needed. No processor or payout eligibility is assumed.
+Lebanon, cash at the venue and Whish player payments were confirmed. The user supplied the sandbox/production base URLs and asked to skip live execution. Those roots are configured server-side; private operation paths/signing rules are not guessed. Host cash-outs are not requested in this edition.
 
-The current Payments & venue shares page honestly shows offline settlement and disabled online payouts. It has no fabricated wallet balance, bank form or simulated cash-out. Once the provider is identified, implement its hosted collection, signed webhook verification, idempotent reconciliation and supported host payout onboarding using sandbox credentials first. Merchant KYC, supported currencies, refund/payout eligibility and fees must be verified against that provider's actual contract.
+The current Payments & venue shares page honestly shows offline settlement and disabled online payouts. It has no fabricated wallet balance, bank form or simulated cash-out. When the private Whish contract is available, implement its hosted collection, verified status/webhook checks and idempotent reconciliation using sandbox credentials first. Merchant KYC, supported currencies, refund/payout eligibility and fees must be verified against that provider's actual contract.
 
 ## Verification commands
 

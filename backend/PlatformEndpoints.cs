@@ -12,12 +12,13 @@ public static class PlatformEndpoints
     private static int Id(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
     public static void MapPlatform(this WebApplication app)
     {
-        app.MapGet("/api/config", (IConfiguration config, ResetEmail email) => Results.Ok(new
+        app.MapGet("/api/config", (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish) => Results.Ok(new
         {
             mapsEmbedApiKey = config["Maps:EmbedApiKey"] ?? "",
             passwordResetAvailable = email.Enabled,
-            onlinePaymentsAvailable = false,
+            onlinePaymentsAvailable = whish.IsAvailable,
             payoutAvailable = false,
+            paymentMethods = new[] { new { code = "Cash", name = "Cash at the venue", available = true }, new { code = "Whish", name = "Whish Money", available = whish.IsAvailable } },
             currencies = new[] { "USD", "LBP" },
             country = "LB"
         }));
@@ -56,7 +57,7 @@ public static class PlatformEndpoints
             return Results.Ok(new { message = "Game cancelled. Players have been notified." });
         }).RequireAuthorization();
         app.MapPost("/api/games/{id:int}/sponsored-place", async (int id, ClaimsPrincipal user, Database db, CancellationToken ct) =>
-            Results.Ok((await db.Call("dbo.JoinGame", ct, P("@GameId", SqlDbType.Int, id),
+            Results.Ok((await db.Call("dbo.sp_JoinGameOrActivity", ct, P("@GameId", SqlDbType.Int, id),
                 P("@UserId", SqlDbType.Int, Id(user)), P("@ClaimSponsored", SqlDbType.Bit, true)))[0][0])).RequireAuthorization();
         app.MapGet("/api/me/notifications", async (long? beforeId, ClaimsPrincipal user, Database db, CancellationToken ct) =>
         {

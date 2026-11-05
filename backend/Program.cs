@@ -11,6 +11,9 @@ using static Database;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<GameOn.Payments.WhishMerchantConfiguration>();
+builder.Services.AddHttpClient("whish", (services, client) => { client.BaseAddress = services.GetRequiredService<GameOn.Payments.WhishMerchantConfiguration>().BaseAddress; client.Timeout = TimeSpan.FromSeconds(15); });
+builder.Services.AddSingleton<GameOn.Payments.IWhishGateway, GameOn.Payments.UnconfiguredWhishGateway>();
 builder.Services.AddHttpClient("email", c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ResetEmail>();
 builder.Services.AddHostedService<ResetDelivery>();
@@ -42,6 +45,9 @@ builder.Services.AddRateLimiter(o =>
     System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new()
         { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    o.AddPolicy("browse", context => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new()
+        { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
 app.Use(async (ctx, next) =>
@@ -58,6 +64,8 @@ app.Use(async (ctx, next) =>
     { ctx.Response.StatusCode = ex.StatusCode; await ctx.Response.WriteAsJsonAsync(new { error = "Check the request format and field values." }); }
     catch (SqlException ex) when (ex.Number is 2601 or 2627)
     { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = "Record already exists." }); }
+    catch (SqlException ex) when (ex.Number is 50005)
+    { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50003)
     { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "Only the host can change this game." }); }
     catch (SqlException ex) when (ex.Number is 50004)
@@ -130,10 +138,13 @@ app.MapGet("/api/auth/me", async (ClaimsPrincipal u, Database db, CancellationTo
 app.MapGet("/api/lookups", async (Database db, CancellationToken ct) =>
 {
     var sets = await db.Call("dbo.GetLookups", ct);
-    return Results.Ok(new { sports = sets[0], venues = sets[1] });
+    return Results.Ok(new { sports = sets[0], subtypes = sets[0], venues = sets[1], categories = sets[2] });
 });
-app.MapGet("/api/games", async (int? sportId, string? date, string? area, bool? freeOnly, ClaimsPrincipal user, Database db, CancellationToken ct) =>
+app.MapGet("/api/games", async (int? sportId, string? date, string? area, bool? freeOnly, bool? openOnly, string? category, int? subtypeId, ClaimsPrincipal user, Database db, CancellationToken ct) =>
 {
+    if (category is not null && category is not "sports" and not "activities") return Results.BadRequest(new { error = "Choose Sports or Activities." });
+    if (sportId is not null && subtypeId is not null && sportId != subtypeId) return Results.BadRequest(new { error = "Conflicting event types." });
+    sportId ??= subtypeId;
     DateTime? day = null;
     if (!string.IsNullOrEmpty(date))
     {
@@ -147,13 +158,14 @@ app.MapGet("/api/games", async (int? sportId, string? date, string? area, bool? 
         P("@SportId", SqlDbType.Int, sportId), P("@Date", SqlDbType.Date, day),
         P("@Area", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(area) ? null : area, 80),
         P("@UserId", SqlDbType.Int, user.Identity?.IsAuthenticated == true ? UserId(user) : null),
-        P("@FreeOnly", SqlDbType.Bit, freeOnly ?? false)))[0]);
-});
-app.MapGet("/api/games/{id:int}", async (int id, Database db, CancellationToken ct) =>
+        P("@FreeOnly", SqlDbType.Bit, freeOnly ?? false),
+        P("@CategorySlug", SqlDbType.VarChar, category, 24), P("@OpenOnly", SqlDbType.Bit, openOnly ?? false)))[0]);
+}).RequireRateLimiting("browse");
+app.MapGet("/api/games/{id:int}", async (int id, ClaimsPrincipal user, Database db, CancellationToken ct) =>
 {
-    var sets = await db.Call("dbo.GetGame", ct, P("@GameId", SqlDbType.Int, id));
-    return sets[0].Count == 0 ? Results.NotFound() : Results.Ok(new { game = sets[0][0], roster = sets[1] });
-});
+    var sets = await db.Call("dbo.GetGame", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, user.Identity?.IsAuthenticated == true ? UserId(user) : null));
+    return sets[0].Count == 0 ? Results.NotFound() : Results.Ok(new { game = sets[0][0], roster = sets[1], membership = sets[2].FirstOrDefault() });
+}).RequireRateLimiting("browse");
 app.MapGet("/api/me/games", async (ClaimsPrincipal user, Database db, CancellationToken ct) =>
     Results.Ok((await db.Call("dbo.MyGames", ct, P("@UserId", SqlDbType.Int, UserId(user))))[0])).RequireAuthorization();
 app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database db, CancellationToken ct) =>
@@ -168,8 +180,12 @@ app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database d
         P("@SponsoredSlots", SqlDbType.SmallInt, input.SponsoredSlots)))[0];
     return Results.Created($"/api/games/{rows[0]["gameId"]}", rows[0]);
 }).RequireAuthorization();
-app.MapPost("/api/games/{id:int}/join", async (int id, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-    Results.Ok((await db.Call("dbo.JoinGame", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0])).RequireAuthorization();
+app.MapPost("/api/games/{id:int}/join", async (int id, JoinRequest? input, ClaimsPrincipal u, Database db, CancellationToken ct) =>
+{
+    if (input?.PaymentMethod is not null and not "Cash" and not "Whish") return Results.BadRequest(new { error = "Unknown payment method." });
+    return Results.Ok((await db.Call("dbo.sp_JoinGameOrActivity", ct, P("@GameId", SqlDbType.Int, id),
+        P("@UserId", SqlDbType.Int, UserId(u)), P("@PaymentMethod", SqlDbType.VarChar, input?.PaymentMethod ?? "Cash", 12)))[0][0]);
+}).RequireAuthorization();
 app.MapDelete("/api/games/{id:int}/participation", async (int id, ClaimsPrincipal u, Database db, CancellationToken ct) =>
     Results.Ok((await db.Call("dbo.CancelParticipation", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0])).RequireAuthorization();
 app.MapPlatform();
@@ -180,3 +196,5 @@ static bool ValidEmail(string? email) => email is not null && email.Length <= 25
 record Register(string Email, string DisplayName, string Password);
 record Login(string Email, string Password);
 record NewGame(int SportId, int VenueId, DateTimeOffset StartsAt, short Capacity, string? Description = "", decimal CostPerPlayer = 0, string Currency = "USD", short SponsoredSlots = 0);
+
+record JoinRequest(string PaymentMethod = "Cash");

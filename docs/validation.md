@@ -31,3 +31,18 @@ Still unverified in the cloud: live upgrade execution, database constraints and 
 The user demonstrated the original lookup, registration/sign-in and game creation flows against their local SQL Server. Those observations concern the original version, not this new migration.
 
 Online payments and cash-out are disabled pending the merchant-provider name, API documentation and secure sandbox configuration. Password email delivery remains disabled until configured. Google Maps directions work without a key; embedded API maps require configuration. In-app notifications poll while the app is visible; background push notifications are not implemented.
+
+## GIN401 category/event edition (2026-11-05, Beirut)
+
+- API build passed with zero warnings/errors. The reproducible database-check runner also compiled with zero warnings/errors.
+- All 13 SQL files passed Microsoft ScriptDom's SQL Server 2022 grammar. Reproduce from the repository root: `dotnet run --project tests/GameOn.DatabaseChecks -- --syntax`. This is syntax validation, not engine execution or schema binding.
+- Browser suite passed 17-type catalog presentation, All/Sports/Activities and open-spot filters, sports and activity wizard paths, preference updates, host-only UI controls, editing, sponsor claims, cash reservation request/state, unavailable Whish, waitlist/withdrawal, cancellation, notifications and 390-pixel mobile overflow checks. API responses were explicit fixtures; no payment or SQL execution was simulated as real.
+- Actual HTTPS middleware checks passed CSRF enforcement, anonymous route rejection, malformed category/conflicting subtype validation, reset input validation and public cash/Whish readiness flags. Certificate verification remained enabled.
+- Frontend production build passed at approximately 71 KB gzip JavaScript and 6.4 KB gzip CSS. These are bundle sizes, not load-test results.
+- Current npm and backend NuGet audits reported no known vulnerabilities.
+
+Not run: live 09 migration, distributed analytics seed, SQL invariant tests, actual two-connection concurrency checks, query-plan/throughput benchmarks, live/sandbox Whish operations. The database runner requires a disposable SQL Server database ending in _Tests and securely configured test credentials; compiling it is not a passing database test. The cloud registry download limitation remains; no connection to the user's local SQL Server is available.
+
+The user confirmed cash in person + Whish player payments, supplied sandbox/production roots and explicitly requested skipping/mocking execution. This release skips execution, stores no payment-provider secrets and creates no fake successful payments. Merchant operation paths/authentication and verification rules remain unimplemented until the private contract is available. No host cash-out workflow was requested in this clarified scope.
+
+The final GameOn.sln includes the API, database-check project, and virtual solution folders for SQL, React source and guides. The full solution build passed with `dotnet build --no-restore -m:1`, zero warnings/errors. Validation used single-worker mode; a parallel invocation in this sandbox returned a nonzero exit without compiler errors. SQL checks remain unexecuted against an engine.

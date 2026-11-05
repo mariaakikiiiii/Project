@@ -18,7 +18,8 @@ public sealed class Database(IConfiguration config)
         await connection.OpenAsync(ct);
         await using var command = new SqlCommand(procedure, connection)
         { CommandType = CommandType.StoredProcedure, CommandTimeout = 30 };
-        command.Parameters.AddRange(parameters);
+        foreach (var parameter in parameters)
+            command.Parameters.Add(parameter);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var sets = new List<List<Dictionary<string, object?>>>();
         do

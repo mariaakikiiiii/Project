@@ -1,6 +1,6 @@
 # GameOn
 
-**Already running the first version? Follow [the upgrade guide](docs/UPGRADE.md). Run 07-platform-upgrade.sql once after backing up; do not rerun the original schema.**
+**GIN401 sports + activities edition:** read [the lab and schema guide](docs/GIN401.md). Existing databases apply version 7 if needed, then version 9; do not rerun the original schema. See [the Windows upgrade steps](docs/UPGRADE.md). Whish network execution is skipped as requested; cash-at-venue reservations work without merchant credentials.
 
 ![Redesigned GameOn discovery interface](docs/screenshots/discovery-preview.png)
 
@@ -17,9 +17,11 @@ A DBA creates an empty `GameOn` database using SQL Server or Azure SQL. Run thes
 3. [03-seed.sql](database/03-seed.sql): development fixtures and **200,000 activity events**, generated without per-row loops. The fixture host cannot sign in; register your own account.
 4. Provision a dedicated `gameon_api` server login securely outside source control, then run [04-security.sql](database/04-security.sql). Use a distinct migration identity. Do not grant the API identity admin or direct table permissions.
 5. Install [07-platform-upgrade.sql](database/07-platform-upgrade.sql) in SQLCMD Mode as described in the upgrade guide.
-6. Run [05-tests.sql](database/05-tests.sql), then follow the two-session concurrency lab in [architecture.md](docs/architecture.md).
-7. Run [08-platform-tests.sql](database/08-platform-tests.sql) on a disposable upgraded database.
-8. Run [06-performance.sql](database/06-performance.sql) with actual execution plans enabled for the large-table lab.
+6. Install [09-categories-and-events.sql](database/09-categories-and-events.sql) in SQLCMD Mode, then run [10-user-analytics-seed.sql](database/10-user-analytics-seed.sql) for the additional 200,000-row analytics fixture.
+7. Run [05-tests.sql](database/05-tests.sql), then follow the two-session concurrency lab in [architecture.md](docs/architecture.md).
+8. Run [08-platform-tests.sql](database/08-platform-tests.sql) on a disposable upgraded database.
+9. Run [12-category-event-tests.sql](database/12-category-event-tests.sql), then [11-analytics-performance.sql](database/11-analytics-performance.sql).
+10. Run [06-performance.sql](database/06-performance.sql) with actual execution plans enabled for the large-table lab.
 
 SQL scripts use `GO`, which is handled by SSMS/sqlcmd, not by SqlCommand. They target a fresh database; schema/security migrations are deliberately not destructive rerunnable scripts. The data seed is rerunnable. No database is created automatically by the application.
 
@@ -54,3 +56,32 @@ Vite forwards `/api` to `https://localhost:7043`. Both UI and API use one browse
 Register two or more accounts in separate browser profiles. Create a game with capacity 2 (the host is automatically enrolled). A second account joins; a third is queued. Leave with the second account; refresh the third account's My Games and verify Joined. Verify duplicate Join does not increment the count, an unauthenticated Join returns 401, invalid capacity fails, and a missing/invalid CSRF token rejects a state change. Check SQL results and audit events, not just HTTP status. API lookup reads and registration require database migrations and least-privilege grants first.
 
 See [architecture and performance guide](docs/architecture.md) for transaction reasoning, execution-plan interpretation, security boundaries, and known scope limits. See [validation record](docs/validation.md) for checks actually run in this environment.
+
+## Source layout
+
+```text
+GameOn.sln
+backend/
+  Program.cs                 Authentication, filters, enrollments
+  Database.cs                Typed ADO.NET SqlCommand.Parameters.Add
+  PlatformEndpoints.cs       Profiles, notifications, host controls
+  Payments/                  Whish server-client boundary (execution skipped)
+  Properties/launchSettings.json
+frontend/src/
+  main.jsx                   Discovery, details, dashboard, profile, auth
+  components/CategoryTabs.jsx
+  components/EventWizard.jsx  Category → subtype → plan → review
+  components/PaymentSelector.jsx
+  api.js, domain.js, style.css
+database/
+  install-fresh.sql           Fresh lab installation only
+  01–04                     Original schema, procedures, seed, grants
+  07-platform-upgrade.sql     Existing-data platform upgrade
+  09-categories-and-events.sql
+  10-user-analytics-seed.sql
+  11-analytics-performance.sql
+  05, 08, 12                SQL invariant tests
+tests/GameOn.DatabaseChecks/  Actual two-connection SQL race runner
+frontend/tests/ui-check.cjs   Browser checks with explicit API fixtures
+docs/GIN401.md, UPGRADE.md, validation.md
+```

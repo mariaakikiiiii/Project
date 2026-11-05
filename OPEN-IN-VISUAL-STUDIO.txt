@@ -13,3 +13,5 @@ Builds and security middleware smoke tests passed in the cloud. SQL Server and e
 Generated dependencies and build output are omitted; npm and NuGet restore them.
 
 PLATFORM UPGRADE: read docs/UPGRADE.md. Existing databases must apply 07-platform-upgrade.sql once in SQLCMD Mode. Do not rerun 01-schema.sql. Online cash-out needs your merchant-provider integration; Maps Embed and recovery email need secure configuration.
+
+GIN401 EDITION: after version 7, install 09-categories-and-events.sql once in SQLCMD Mode, then 10-user-analytics-seed.sql. Read docs/GIN401.md. All 17 sports/activities and the multi-step event form are included. Whish execution is skipped per request.

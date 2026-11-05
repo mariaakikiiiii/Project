@@ -55,3 +55,9 @@ status, body = call("/auth/reset-password", "POST", {"token": "invalid", "passwo
                     {"X-CSRF-TOKEN": json.loads(call("/csrf")[1])["token"]})
 assert status == 400
 print("PASS: platform route authorization, public configuration boundaries and reset input validation.")
+
+assert call("/games?category=unknown")[0] == 400
+assert call("/games?sportId=1&subtypeId=2")[0] == 400
+methods = {item["code"]: item["available"] for item in configuration["paymentMethods"]}
+assert methods == {"Cash": True, "Whish": False}
+print("PASS: category/subtype input validation and cash/Whish capability boundaries.")

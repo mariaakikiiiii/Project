@@ -12,7 +12,7 @@ export const price = (game) =>
     : new Intl.NumberFormat("en-LB", {
         style: "currency",
         currency: game.currency,
-        maximumFractionDigits: game.currency === "LBP" ? 0 : 2,
+        maximumFractionDigits: 2,
       }).format(game.costPerPlayer);
 export const availableCovered = (game) =>
   game.gameStatus === "Open" && dateOf(game.startsAt) > new Date()
