@@ -81,3 +81,12 @@ assert "serverApiKey" not in configuration and "Maps:ServerApiKey" not in config
 assert configuration["manualWhishAvailable"] is True
 assert configuration["manualWhishRecipient"] == "+96171364432"
 print("PASS: manual Whish payment/history/review routes deny anonymous callers; configuration exposes only the public recipient and browser map configuration.")
+
+for path, method in [("/games/1/deposit-quote", "GET"), ("/games/1/deposit-checkout", "POST"),
+                     ("/me/deposits", "GET"), ("/deposits/reviews", "GET"), ("/operator/venues", "GET"),
+                     ("/operator/venues/1", "PUT"),
+                     ("/deposits/00000000-0000-4000-8000-000000000001/transfer", "POST"),
+                     ("/deposits/00000000-0000-4000-8000-000000000001/review", "POST")]:
+    assert call(path, method, {} if method != "GET" else None)[0] == 401, path
+assert configuration["serviceFeeRate"] == 0.05
+print("PASS: deposit quote, authorization, reference, history, review and venue-management routes deny anonymous callers; current service fee is 5%.")

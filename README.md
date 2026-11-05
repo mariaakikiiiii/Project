@@ -1,10 +1,10 @@
 # Latest update
 
-Dark/light themes, Lebanon venue search and manual Whish transfers: follow [the update 16 instructions](docs/UPDATE-16.md) for an existing installation. This update requires SQL migration 16. Embedded Google Maps requires your own restricted Google keys; Whish references require manual operator verification.
+Venue direct contact and commitment deposits: follow [the migration 18 instructions](docs/DEPOSITS.md) after migration 16. New events require a $1 deposit; new booking shares use a 5% service fee. Transfer references remain pending until an operator verifies received funds. Existing bookings/invoices retain their financial snapshots. [Dark/light themes and Google Maps setup](docs/UPDATE-16.md) remain available.
 
 # GameOn
 
-**Commercial layer:** [apply migration 13 and try 2% checkout, mock Whish and sponsored venues](docs/COMMERCIAL.md). Real Whish execution remains disabled; the local demo never transfers money.
+**Commercial layer:** [migration 13 historical guide: mock Whish and sponsored venues (superseded by migration 18)](docs/COMMERCIAL.md). Real Whish execution remains disabled; the local demo never transfers money.
 
 **GIN401 sports + activities edition:** read [the lab and schema guide](docs/GIN401.md). Existing databases apply version 7 if needed, then version 9; do not rerun the original schema. See [the Windows upgrade steps](docs/UPGRADE.md). Whish network execution is skipped as requested; cash-at-venue reservations work without merchant credentials.
 

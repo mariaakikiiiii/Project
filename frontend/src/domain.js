@@ -8,7 +8,7 @@ export const localInput = (value) => {
 };
 export const price = (game) =>
   Number(game.costPerPlayer) === 0
-    ? "Free to play"
+    ? (game.requiresDeposit ? "Free share · $1 deposit" : "Free to play")
     : new Intl.NumberFormat("en-LB", {
         style: "currency",
         currency: game.currency,

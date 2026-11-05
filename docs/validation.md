@@ -68,3 +68,12 @@ Not executed: live migration 13, actual SQL cash/idempotency transitions, real c
 - API HTTPS middleware smoke: passed, including anonymous denial for payment history, transfer submission and operator review routes; server map key absent from public configuration. This is not a database role/ownership integration test.
 - Microsoft ScriptDom parsed all SQL scripts, including migrations 16 and tests 17. No SQL Server engine is available here. Script 17 (manual booking idempotency, submission, operator authorization/audit and cancellation reconciliation) is provided for a disposable SQL Server copy and has **not** been executed on an engine.
 - No live Google Maps/Places/Geocoding call, real Whish transfer, refund or merchant checkout execution occurred. Those integrations require owner configuration and live/sandbox validation. Receiving a transfer reference never automatically marks a payment verified.
+
+
+## Migration 18: venue contacts and commitment deposits (2026-11-05)
+
+- .NET solution build and Vite production build passed. 24 payment/security/map policy checks passed, including the updated 5% decimal and midpoint rounding cases.
+- Chromium with explicit API/Google fixtures passed: USD 2 share + USD 1 deposit + USD 0.10 fee = USD 3.10, switching to a USD 1 deposit-only/cash-balance choice, pending transfer reference/history, validated venue tel link and paid-deposit roster badge, plus previous catalog/booking/theme/maps coverage. Fixtures never establish funds received.
+- Actual API HTTPS middleware smoke passed for deposit quote/checkout, reference submission, history/review and operator venue-management authentication boundaries, and public 5% rate configuration. Authenticated owner/role checks require the live database tests; middleware smoke alone does not prove them.
+- All SQL scripts passed Microsoft ScriptDom syntax parsing. SQL Server is unavailable here: migration 18 and acceptance script 19 are **not engine-executed**. The guarded disposable-database C# runner now includes deposit bypass rejection, two blocked authorization connections competing for a final spot, one held/one refund-review result, capacity preservation and full-event confirmation. These engine tests are supplied and compiled, not claimed as executed.
+- Manual Whish only: no real transfer, authorization, refund, call or no-show forfeiture was performed. Operators must verify actual bank/Whish/attendance evidence before recording an action.

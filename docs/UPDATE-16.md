@@ -1,3 +1,5 @@
+> Current API: apply [migration 18 for contacts/deposits and 5% fees](DEPOSITS.md) after version 16. The instructions below describe the earlier version.
+
 # Update 16: themes, Lebanese venue discovery and manual Whish
 
 Previews use explicit test fixtures: [dark discovery](discovery-preview.png), [light discovery](light-theme-preview.png), [checkout](checkout-preview.png), [manual Whish](manual-whish-preview.png).

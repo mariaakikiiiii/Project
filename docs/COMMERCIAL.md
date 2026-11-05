@@ -1,3 +1,5 @@
+> Current API: apply [migration 18 for contacts/deposits and 5% fees](DEPOSITS.md) after version 16. The instructions below describe the earlier version.
+
 > Latest: [Update 16](UPDATE-16.md) adds the new theme, venue maps and manual Whish transfers. Follow that guide after version 13. Automated merchant checkout remains unconnected.
 
 # Commercial layer: 2% fees, sponsored venues and mock Whish checkout

@@ -77,7 +77,7 @@ const fs = require("node:fs"),
   const events = [
     make(1, types[0], { sponsoredSlots: 1 }),
     make(2, types[1], { costPerPlayer: 0 }),
-    make(3, types[2]),
+    make(3, types[2], {requiresDeposit:true,depositAmount:1,venueIsVerified:true,contactPhoneNumber:"+96100000000",costPerPlayer:2}),
     make(4, types[9], { venue: "Adventure Arena" }),
     make(5, types[14], { capacity: 2, playerCount: 2 }),
   ];
@@ -91,6 +91,7 @@ const fs = require("node:fs"),
     cancelled = false,
     cashJoined = false,
     queued = false;
+  let depositBooking = null;
   const paymentRecords = new Map();
   const memberships = new Map(),
     errors = [];
@@ -146,7 +147,7 @@ const fs = require("node:fs"),
         onlinePaymentsAvailable: false,
         payoutAvailable: false,
         mockPaymentsAvailable: true,
-        serviceFeeRate: 0.02,
+        serviceFeeRate: 0.05,
       };
     else if (p === "/api/csrf") data = { token: "ui-fixture-token" };
     else if (p === "/api/auth/me") {
@@ -193,7 +194,7 @@ const fs = require("node:fs"),
           game: g,
           roster: [
             { userId: 1, displayName: "Maria", isSponsored: false },
-            { userId: 2, displayName: "Jad", isSponsored: false },
+            { userId: 2, displayName: "Jad", isSponsored: false, depositStatus:"PAID_HELD" },
             ...(memberships.get(`3:${id}`)?.status === "Joined"
               ? [
                   {
@@ -209,14 +210,22 @@ const fs = require("node:fs"),
               ? { status: "Joined", paymentMethod: "Cash" }
               : memberships.get(key(id)) || null,
         };
+    } else if (p === "/api/games/3/deposit-quote") {
+      data = {gameId:3,revision:1,requiresDeposit:true,depositAmount:1,currency:"USD",baseAmount:2,serviceFee:0.10,totalAmount:3.10,venueIsVerified:true,isOpen:true,isFull:false,paymentMethod:url.searchParams.get("method")||"WhishManual",dueNow:url.searchParams.get("method")==="Cash"?1:3.10};
+    } else if (p === "/api/games/3/deposit-checkout") {
+      depositBooking = {depositId:"30000000-0000-4000-8000-000000000003",gameId:3,baseAmount:2,serviceFee:0.10,depositAmount:1,totalAmount:3.10,currency:"USD",depositStatus:"PENDING",recipientNumber:"+96171364432",eventRevision:1,currentRevision:1,gameStatus:"Open",startsAt:future,sport:"Padel",venue:"Central Court"};
+      data = depositBooking;
+    } else if (p === "/api/deposits/30000000-0000-4000-8000-000000000003/transfer") {
+      depositBooking = {...depositBooking,transferReference:req.postDataJSON().reference};data = depositBooking;
+    } else if (p === "/api/me/deposits") { data={deposits:depositBooking?[depositBooking]:[],canReview:false};
     } else if (/^\/api\/games\/\d+\/quote$/.test(p)) {
       const id = Number(p.split("/")[3]),
         g = events.find((g) => g.gameId === id);
       data = {
         gameId: id,
         amount: g.costPerPlayer,
-        serviceFee: 0.3,
-        totalAmount: g.costPerPlayer + 0.3,
+        serviceFee: 0.75,
+        totalAmount: g.costPerPlayer + 0.75,
         currency: g.currency,
         revision: g.revision,
         isFull: g.playerCount >= g.capacity,
@@ -238,8 +247,8 @@ const fs = require("node:fs"),
           paymentId,
           gameId: id,
           amount: g.costPerPlayer,
-          serviceFee: 0.3,
-          totalAmount: g.costPerPlayer + 0.3,
+          serviceFee: 0.75,
+          totalAmount: g.costPerPlayer + 0.75,
           currency: "USD",
           mode: "WhishMock",
           status: "MockPending",
@@ -261,8 +270,8 @@ const fs = require("node:fs"),
           recipientNumber: b.method === "WhishManual" ? "+96171364432" : null,
           gameId: id,
           amount: g.costPerPlayer,
-          serviceFee: 0.3,
-          totalAmount: g.costPerPlayer + 0.3,
+          serviceFee: 0.75,
+          totalAmount: g.costPerPlayer + 0.75,
           currency: "USD",
         };
         if (b.method === "WhishManual") { data.status = "AwaitingTransfer"; paymentRecords.set(paymentId, data); }
@@ -500,11 +509,11 @@ const fs = require("node:fs"),
     .click();
   const checkout = page.getByRole("dialog", { name: "Review your booking" });
   await checkout
-    .getByText("Platform service fee (2%)", { exact: true })
+    .getByText("Platform service fee (5%)", { exact: true })
     .waitFor();
   assert.match(
     (await checkout.locator("dd").allTextContents()).join(" "),
-    /15\.30/,
+    /15\.75/,
   );
   await checkout.screenshot({path:path.join(os.tmpdir(),"GameOn-checkout.png")});
   await checkout
@@ -540,7 +549,7 @@ const fs = require("node:fs"),
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
   await page.getByRole("button", { name: "Close checkout" }).click();
   await page.getByRole("button", { name: "Payments", exact:true }).click();
-  await page.getByText(/Paintball at Adventure Arena · USD 15.3 · Awaiting verification/).waitFor();
+  await page.getByText(/Paintball at Adventure Arena · USD 15.75 · Awaiting verification/).waitFor();
   await page.locator(".payment-record summary").click();
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
   assert.equal(await page.getByRole("heading", {name:"Whish transfer reviews"}).count(), 0);
@@ -548,6 +557,28 @@ const fs = require("node:fs"),
   await page.locator(".venue-discovery summary").click();
   await page.locator(".venue-discovery input").fill("Tripoli");
   assert.match(await page.getByRole("link", {name:"Open Google Maps ↗", exact:true}).getAttribute("href"), /Tripoli/);
+  await discover();
+  await open("Padel","Central Court");
+  await page.getByRole("heading",{name:"Call Venue to Reserve",exact:true}).waitFor();
+  assert.equal(await page.getByRole("link",{name:"Call Now",exact:true}).getAttribute("href"),"tel:+96100000000");
+  await page.getByText("Deposit Verified · Spot Reserved",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"Join this event",exact:true}).click();
+  const depositDialog = page.getByRole("dialog",{name:"Review your deposit booking"});
+  await depositDialog.getByText("Platform fee (5% of game share)",{exact:true}).waitFor();
+  assert.match((await depositDialog.locator("dd").allTextContents()).join(" "),/\$2\.00.*\$1\.00.*\$0\.10.*\$3\.10/);
+  await page.getByRole("radio",{name:"Pay the $1 deposit now; share and fee in cash at the venue",exact:true}).check();
+  await page.waitForFunction(()=>document.querySelector(".checkout-dialog .fee-breakdown .total dd")?.textContent==="$1.00");
+  await page.getByRole("radio",{name:"Pay share, fee and deposit with Whish",exact:true}).check();
+  await page.waitForFunction(()=>document.querySelector(".checkout-dialog .fee-breakdown .total dd")?.textContent==="$3.10");
+  await depositDialog.screenshot({path:path.join(os.tmpdir(),"GameOn-deposit-checkout.png")});
+  await page.getByRole("button",{name:"Continue to Whish deposit transfer"}).click();
+  await depositDialog.getByLabel("Whish transfer reference").fill("DEPOSIT-FIXTURE-123");
+  await page.getByRole("button",{name:"Submit deposit transfer reference"}).click();
+  await page.getByText("Reference submitted. Awaiting operator verification. Do not transfer again.",{exact:true}).waitFor();
+  assert.equal(depositBooking.depositStatus,"PENDING");
+  await page.getByRole("button",{name:"Close deposit checkout"}).click();
+  await page.getByRole("button",{name:"Payments",exact:true}).click();
+  await page.getByText("Padel at Central Court · Deposit pending",{exact:true}).waitFor();
   await page.getByRole("button", { name: /Sign out/ }).click();
   await login("maria@example.invalid", "Maria");
   await page.getByRole("button", { name: /Inbox/ }).click();
@@ -622,7 +653,7 @@ const fs = require("node:fs"),
   assert.deepEqual(errors, []);
   await browser.close();
   console.log(
-    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, cash fee breakdown, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
+    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, 5% cash fee breakdown, $1 deposit/5% quote and cash-balance option, venue tel link, deposit roster badge and pending reference/history, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
   );
 })().catch((error) => {
   console.error(error);

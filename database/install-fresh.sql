@@ -20,5 +20,6 @@ GO
 :r database/10-user-analytics-seed.sql
 :r database/13-commercial-layer.sql
 :r database/16-location-manual-whish.sql
-PRINT 'GameOn lab database installed. Run 05, 08, 12, 15 and 17 tests on a disposable copy.';
+:r database/18-security-deposits.sql
+PRINT 'GameOn lab database installed. Run 19-security-deposit-tests.sql and the guarded database checks on a disposable copy. Earlier SQL tests target their corresponding migration versions.';
 GO

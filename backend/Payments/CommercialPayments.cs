@@ -9,7 +9,7 @@ namespace GameOn.Payments;
 
 public static class BookingFees
 {
-    public const decimal Rate = 0.02m;
+    public const decimal Rate = 0.05m;
     public static decimal ServiceFee(decimal amount)
     {
         if (amount < 0 || amount > 99999999.99m || decimal.Round(amount, 2) != amount)

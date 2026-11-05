@@ -256,3 +256,8 @@ summary::marker { color: var(--positive); }
 .host-label, .sponsor-disclosure { font-size: 12px; }
 .checkbox { font-size: 13px; }
 .venue-labels { font-size: 11px; }
+.venue-contact { border-color: #10b98155; }
+.venue-contact h2 { margin: 12px 0; }
+.venue-contact a { text-decoration: none; }
+.venue-phone { display: block; font-size: 24px; font-weight: 750; margin: 20px 0; }
+.roster .pill { margin-top: 8px; display: inline-flex; }

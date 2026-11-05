@@ -6,8 +6,8 @@ using Microsoft.Extensions.Hosting;
 
 var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new InvalidOperationException(name); passed++; Console.WriteLine("PASS: " + name); }
-foreach (var (amount, expected) in new[] { (0m, 0m), (0.25m, 0.01m), (1.25m, 0.03m), (15m, 0.30m), (19.99m, 0.40m), (100m, 2m), (99999999.99m, 2000000m) })
-    Check(BookingFees.ServiceFee(amount) == expected, "2% exact decimal/half-cent rounding for " + amount);
+foreach (var (amount, expected) in new[] { (0m, 0m), (0.10m, 0.01m), (0.25m, 0.01m), (1.25m, 0.06m), (15m, 0.75m), (19.99m, 1.00m), (100m, 5m), (99999999.99m, 5000000m) })
+    Check(BookingFees.ServiceFee(amount) == expected, "5% exact decimal/half-cent rounding for " + amount);
 foreach (var amount in new[] { -1m, 0.001m, 100000000m })
 {
     try { BookingFees.ServiceFee(amount); throw new InvalidOperationException("Invalid amount accepted"); }

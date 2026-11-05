@@ -30,7 +30,8 @@ if (!builder.InitialCatalog.EndsWith("_Tests", StringComparison.OrdinalIgnoreCas
     Console.WriteLine("REFUSED: use a disposable upgraded database with a name ending in _Tests.");
     return 2;
 }
-var users = new List<int>(); var games = new List<int>(); var passed = 0;
+var users = new List<int>(); var games = new List<int>(); var fixtureVenues = new List<int>(); var passed = 0;
+var depositsInstalled = false;
 SqlParameter P(string name, SqlDbType type, object value, int size = 0) =>
     size > 0 ? new SqlParameter(name, type, size) { Value = value } : new SqlParameter(name, type) { Value = value };
 async Task<object?> Query(string text, bool procedure, params SqlParameter[] parameters)
@@ -55,10 +56,13 @@ async Task<int> Create(int type, int capacity, int sponsored = 0, decimal price 
         P("@VenueId", SqlDbType.Int, Convert.ToInt32(await Query("SELECT MIN(VenueId) FROM dbo.Venues", false))),
         P("@StartsAt", SqlDbType.DateTime2, DateTime.UtcNow.AddDays(7)), P("@Capacity", SqlDbType.SmallInt, capacity),
         new SqlParameter("@CostPerPlayer", SqlDbType.Decimal) { Precision = 10, Scale = 2, Value = price }, P("@SponsoredSlots", SqlDbType.SmallInt, sponsored)));
-    games.Add(id); return id;
+    games.Add(id);
+    if (depositsInstalled) await Query("UPDATE dbo.GamesAndEvents SET RequiresDeposit=0 WHERE EventId=@Id", false, P("@Id", SqlDbType.Int, id));
+    return id;
 }
 try
 {
+    depositsInstalled = Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.PlatformMigrations WHERE Version=18", false)) == 1;
     Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Categories WHERE Slug IN('sports','activities')", false)) == 2, "two category sections");
     Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Subtypes WHERE Slug IN('football','basketball','padel','tennis','volleyball','badminton','table-tennis','squash','swimming','paintball','laser-tag','icombat','escape-rooms','go-karting','bowling','archery-tag','airsoft')", false)) == 17, "all seventeen subtypes seeded");
     for (var i = 0; i < 4; i++) users.Add(Convert.ToInt32(await Query("INSERT dbo.Users(Email,DisplayName,PasswordHash) OUTPUT INSERTED.UserId VALUES(@Email,N'Database concurrency fixture',N'DISABLED_FIXTURE')", false,
@@ -123,6 +127,32 @@ try
         Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.PaymentWebhookEvents WHERE PaymentID=@Payment",false,P("@Payment",SqlDbType.UniqueIdentifier,firstPayment)))==1,"identical webhook replay has one stored event");
         await Expect(50002,()=>Confirm(firstPayment,Guid.NewGuid(),firstHash,99m),"signed callback with mismatched amount rejected");
     }
+    if (depositsInstalled)
+    {
+        var venue = Convert.ToInt32(await Query("INSERT dbo.Venues(Name,Area,Address,ContactPhoneNumber,IsVerified) OUTPUT INSERTED.VenueId VALUES(N'Deposit concurrency fixture',N'Beirut',N'Not a real venue','+96100000000',1)", false));
+        fixtureVenues.Add(venue);
+        await Query("INSERT dbo.PaymentOperators(UserId) VALUES(@User)", false, P("@User",SqlDbType.Int,users[3]));
+        var depositGame = await Create(activity,2,0,2m);
+        await Query("UPDATE dbo.GamesAndEvents SET RequiresDeposit=1,VenueId=@Venue WHERE EventId=@Game",false,P("@Venue",SqlDbType.Int,venue),P("@Game",SqlDbType.Int,depositGame));
+        await Expect(50005,()=>Join(depositGame,users[1]),"direct join cannot bypass deposit authorization");
+        async Task<Guid> BeginDeposit(int user) => (Guid)(await Query("dbo.InitializeDeposit",true,P("@GameId",SqlDbType.Int,depositGame),P("@UserId",SqlDbType.Int,user),P("@Revision",SqlDbType.Int,1),P("@Key",SqlDbType.UniqueIdentifier,Guid.NewGuid())))!;
+        var d1=await BeginDeposit(users[1]); var d2=await BeginDeposit(users[2]);
+        await Query("dbo.SubmitDepositTransfer",true,P("@DepositID",SqlDbType.UniqueIdentifier,d1),P("@UserId",SqlDbType.Int,users[1]),P("@Reference",SqlDbType.NVarChar,"fixture_"+d1.ToString("N"),100));
+        await Query("dbo.SubmitDepositTransfer",true,P("@DepositID",SqlDbType.UniqueIdentifier,d2),P("@UserId",SqlDbType.Int,users[2]),P("@Reference",SqlDbType.NVarChar,"fixture_"+d2.ToString("N"),100));
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Participations WHERE GameId=@Game",false,P("@Game",SqlDbType.Int,depositGame)))==1,"pending transfer references do not reserve spots");
+        Task<object?> Review(Guid deposit,int reviewer) => Query("dbo.ReviewDeposit",true,P("@DepositID",SqlDbType.UniqueIdentifier,deposit),P("@UserId",SqlDbType.Int,reviewer),P("@Decision",SqlDbType.VarChar,"VERIFY",20),P("@Note",SqlDbType.NVarChar,"Fixture only: statement reconciled",400));
+        await Expect(50003,()=>Review(d1,users[1]),"ordinary player cannot verify own deposit");
+        await using var holder = new SqlConnection(connectionString); await holder.OpenAsync();
+        await using var held = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using var command = new SqlCommand("SELECT EventId FROM dbo.GamesAndEvents WITH(UPDLOCK,HOLDLOCK) WHERE EventId=@Game",holder,held);command.Parameters.Add(P("@Game",SqlDbType.Int,depositGame));await command.ExecuteScalarAsync();
+        var a=Review(d1,users[3]);var b=Review(d2,users[3]);await Task.Delay(250);
+        Check(!a.IsCompleted&&!b.IsCompleted,"both deposit authorizations block on the same event lock");
+        await held.CommitAsync();await Task.WhenAll(a,b);
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.DepositBookings WHERE GameId=@Game AND DepositStatus='PAID_HELD'",false,P("@Game",SqlDbType.Int,depositGame)))==1,"only one verified deposit can claim the last spot");
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.DepositBookings WHERE GameId=@Game AND DepositStatus='REFUND_PENDING'",false,P("@Game",SqlDbType.Int,depositGame)))==1,"losing verified transfer goes to refund review without overbooking");
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Participations WHERE GameId=@Game",false,P("@Game",SqlDbType.Int,depositGame)))==2,"deposit-backed roster respects capacity");
+        Check((await Query("SELECT DepositBookingStatus FROM dbo.GamesAndEvents WHERE EventId=@Game",false,P("@Game",SqlDbType.Int,depositGame)))?.ToString()=="CONFIRMED_DEPOSIT_LOCKED","full verified roster locks the deposit confirmation state");
+    }
     Console.WriteLine($"PASS: {passed} database checks executed.");
     return 0;
 }
@@ -130,6 +160,7 @@ catch (Exception e) { Console.WriteLine("FAIL: " + e.GetType().Name + (e is SqlE
 finally
 {
     foreach (var id in games)
-        await Query("IF OBJECT_ID('dbo.Payments') IS NOT NULL BEGIN DELETE dbo.PaymentWebhookEvents WHERE PaymentID IN(SELECT PaymentID FROM dbo.Payments WHERE GameID=@Id); DELETE dbo.Payments WHERE GameID=@Id; END; DELETE dbo.UserActivityLogs WHERE EventId=@Id; DELETE dbo.Notifications WHERE GameId=@Id; DELETE dbo.GameActivityLogs WHERE GameId=@Id; DELETE dbo.Waitlists WHERE GameId=@Id; DELETE dbo.Participations WHERE GameId=@Id; DELETE dbo.GamesAndEvents WHERE EventId=@Id;", false, P("@Id", SqlDbType.Int, id));
-    foreach (var id in users) await Query("DELETE dbo.Users WHERE UserId=@Id", false, P("@Id", SqlDbType.Int, id));
+        await Query("IF OBJECT_ID('dbo.DepositBookings') IS NOT NULL BEGIN DELETE dbo.DepositReviews WHERE DepositID IN(SELECT DepositID FROM dbo.DepositBookings WHERE GameId=@Id); DELETE dbo.VerifiedWhishTransfers WHERE PaymentId IN(SELECT PaymentID FROM dbo.Payments WHERE GameID=@Id); DELETE dbo.DepositBookings WHERE GameId=@Id; END; IF OBJECT_ID('dbo.Payments') IS NOT NULL BEGIN DELETE dbo.PaymentWebhookEvents WHERE PaymentID IN(SELECT PaymentID FROM dbo.Payments WHERE GameID=@Id); DELETE dbo.Payments WHERE GameID=@Id; END; DELETE dbo.UserActivityLogs WHERE EventId=@Id; DELETE dbo.Notifications WHERE GameId=@Id; DELETE dbo.GameActivityLogs WHERE GameId=@Id; DELETE dbo.Waitlists WHERE GameId=@Id; DELETE dbo.Participations WHERE GameId=@Id; DELETE dbo.GamesAndEvents WHERE EventId=@Id;", false, P("@Id", SqlDbType.Int, id));
+    foreach (var id in users) await Query("IF OBJECT_ID('dbo.PaymentOperators') IS NOT NULL DELETE dbo.PaymentOperators WHERE UserId=@Id; DELETE dbo.Users WHERE UserId=@Id", false, P("@Id", SqlDbType.Int, id));
+    foreach (var id in fixtureVenues) await Query("DELETE dbo.Venues WHERE VenueId=@Id",false,P("@Id",SqlDbType.Int,id));
 }

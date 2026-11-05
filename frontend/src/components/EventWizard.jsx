@@ -249,7 +249,7 @@ export default function EventWizard({ lookups, existing, onSaved, onBack, config
                 onChange={(e) => change("currency", e.target.value)}
               >
                 <option>USD</option>
-                <option>LBP</option>
+                {existing && <option>LBP</option>}
               </select>
             </label>
             <div className="offer form-wide">
@@ -284,9 +284,9 @@ export default function EventWizard({ lookups, existing, onSaved, onBack, config
             <div className="form-wide payment-note">
               <strong>Clear prices. No surprises.</strong>
               <p>
-                A 2% platform service fee is added for new paid bookings and
+                New events require a $1 commitment deposit and a 5% service fee on the game share,
                 shown to players at checkout. Free and host-covered places have
-                no player fee. Cash is settled with the host. Manual Whish
+                no platform fee on the covered share; the $1 deposit still applies to new events. Manual Whish
                 transfers, when enabled, are sent to GameOn and require verification.
               </p>
             </div>

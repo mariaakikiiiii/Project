@@ -40,6 +40,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
         idempotencyKey: key.current,
         revision: quote.revision,
       });
+      if (result.paymentId) setQuote(q => ({...q,amount:result.amount,serviceFee:result.serviceFee,totalAmount:result.totalAmount,currency:result.currency}));
       if (result.status === "MockSucceeded")
         onComplete("Demo payment already verified. No real money was charged.");
       else if (result.status === "MockPending") setPayment(result);
@@ -123,7 +124,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
               <dd>{money(quote.amount, quote.currency)}</dd>
             </div>
             <div>
-              <dt>Platform service fee (2%)</dt>
+              <dt>Platform service fee (5%)</dt>
               <dd>{money(quote.serviceFee, quote.currency)}</dd>
             </div>
             <div className="total">
@@ -232,7 +233,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
             </button>
           ) : null}
           <p className="checkout-footnote">
-            The 2% fee is rounded to the nearest cent, with half cents rounded
+            The 5% fee is rounded to the nearest cent, with half cents rounded
             up. No currency conversion. Host-covered places are free and have no
             fee.
           </p>

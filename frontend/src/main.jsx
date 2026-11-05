@@ -11,6 +11,9 @@ import {
 } from "./domain";
 import "./style.css";
 import "./theme.css";
+import DepositCheckout from "./components/DepositCheckout";
+import VenueContactCard from "./components/VenueContactCard";
+import DepositHistory from "./components/DepositHistory";
 import CheckoutModal from "./components/CheckoutModal";
 import SponsoredVenues from "./components/SponsoredVenues";
 import VenueMap from "./components/VenueMap";
@@ -456,6 +459,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
   const [version, setVersion] = useState(0),
     [busy, setBusy] = useState(false),
     [checkoutOpen, setCheckoutOpen] = useState(false),
+    [depositCovered, setDepositCovered] = useState(false),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(false),
     [confirmCancel, setConfirmCancel] = useState(false);
@@ -509,10 +513,12 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
       />
     );
   const query = mapQuery(g);
+  const BookingCheckout = g.requiresDeposit ? DepositCheckout : CheckoutModal;
   return (
     <>
       {checkoutOpen && (
-        <CheckoutModal
+        <BookingCheckout
+          covered={depositCovered}
           game={g}
           config={config}
           onClose={() => { setCheckoutOpen(false); setVersion(v => v + 1); }}
@@ -532,6 +538,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
           <span className="overline">
             {g.categoryName} · {g.sport.toUpperCase()} · {g.area.toUpperCase()}
           </span>
+          {g.depositBookingStatus === "CONFIRMED_DEPOSIT_LOCKED" && <span className="pill">Full crew · deposits locked</span>}
           <h1>
             {g.sport} at {g.venue}
           </h1>
@@ -598,11 +605,13 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                           ? "Playing with a host-covered place"
                           : "Ready to play"}
                     </small>
+                    {g.requiresDeposit && p.userId !== g.hostUserId && <span className={`pill ${p.depositStatus === "PAID_HELD" ? "" : "danger"}`}>{p.depositStatus === "PAID_HELD" ? (g.gameStatus === "Cancelled" ? "Deposit Verified · refund review" : "Deposit Verified · Spot Reserved") : p.depositStatus === "REFUNDED" ? (g.gameStatus === "Cancelled" ? "Deposit Refunded" : "Deposit Refunded · Spot Reserved") : p.depositStatus === "FORFEITED" ? "Deposit Forfeited" : "Deposit Pending"}</span>}
                   </div>
                 </li>
               ))}
             </ul>
           </section>
+          <VenueContactCard game={g}/>
           <section className="panel">
             <div className="section-heading">
               <h2>Meet you here</h2>
@@ -667,14 +676,14 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     className="primary full"
                     disabled={busy || !playable(g)}
                     onClick={() =>
-                      act(
+                      g.requiresDeposit ? (setDepositCovered(true), setCheckoutOpen(true)) : act(
                         "/sponsored-place",
                         "POST",
                         "You are in! The host covers your venue fee.",
                       )
                     }
                   >
-                    Claim a free place ↗
+                    {g.requiresDeposit ? "Claim host-covered share" : "Claim a free place ↗"}
                   </button>
                 )}
               </div>
@@ -684,6 +693,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
               left · {g.playerCount} already in
             </p>
             <Alert>{error}</Alert>
+            {g.requiresDeposit && <p className="payment-note">A $1 commitment deposit applies to players, including host-covered shares. The host is exempt. Your spot is reserved only after an operator verifies the transfer.</p>}
             {data.membership && (
               <p className="membership-status" role="status">
                 {queued
@@ -699,13 +709,13 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
             )}
             {Number(g.costPerPlayer) > 0 && !sponsoredMember && (
               <p className="muted">
-                A 2% platform service fee applies when you get a place. Review
+                A 5% platform service fee applies when you get a place. Review
                 the exact total at checkout.
               </p>
             )}
             {sponsoredMember && (
               <p className="muted">
-                Your host-covered place is free, with no platform fee.
+                {g.requiresDeposit ? "Your host covers the venue share. The $1 commitment deposit still applies." : "Your host-covered place is free, with no platform fee."}
               </p>
             )}
             {playable(g) ? (
@@ -717,8 +727,8 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     onClick={() =>
                       !user
                         ? navigate("auth")
-                        : Number(g.costPerPlayer) > 0
-                          ? setCheckoutOpen(true)
+                        : Number(g.costPerPlayer) > 0 || g.requiresDeposit
+                          ? (setDepositCovered(false), setCheckoutOpen(true))
                           : act(
                               "/join",
                               "POST",
@@ -752,6 +762,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     Leave game / waitlist
                   </button>
                 )}
+                {queued && g.requiresDeposit && g.playerCount < g.capacity && <button className="primary full" onClick={() => {setDepositCovered(false);setCheckoutOpen(true);}}>Verify deposit to reserve this opening</button>}
                 <button
                   className="text-link full"
                   onClick={() => navigate("mine")}
@@ -1069,7 +1080,7 @@ function Payments({ config, user }) {
           </p>
         </div>
       </section>
-      {user && <PaymentHistory/>}
+      {user && <><DepositHistory/><PaymentHistory/></>}
     </div>
   );
 }

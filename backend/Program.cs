@@ -212,6 +212,7 @@ app.MapDelete("/api/games/{id:int}/participation", async (int id, ClaimsPrincipa
     Results.Ok((await db.Call("dbo.CancelParticipation", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0])).RequireAuthorization();
 app.MapPlatform();
 app.MapCommercial();
+app.MapDeposits();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254
