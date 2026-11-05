@@ -8,3 +8,7 @@ backend/obj/
 *.pem
 tests/**/bin/
 tests/**/obj/
+
+.vs/
+*.user
+*.suo

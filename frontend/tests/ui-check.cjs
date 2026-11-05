@@ -81,6 +81,7 @@ const fs = require("node:fs"),
     make(4, types[9], { venue: "Adventure Arena" }),
     make(5, types[14], { capacity: 2, playerCount: 2 }),
   ];
+  let mapsEnabled = false, lastCreatedLocation = null;
   let viewer = 0,
     profileSaved = false,
     created = false,
@@ -137,6 +138,10 @@ const fs = require("node:fs"),
     else if (p === "/api/config")
       data = {
         mapsEmbedApiKey: "",
+        mapsBrowserApiKey: mapsEnabled ? "fixture-browser-key" : "",
+        mapsPickerAvailable: mapsEnabled,
+        manualWhishAvailable: true,
+        manualWhishRecipient: "+96171364432",
         passwordResetAvailable: false,
         onlinePaymentsAvailable: false,
         payoutAvailable: false,
@@ -164,6 +169,7 @@ const fs = require("node:fs"),
       );
     } else if (p === "/api/games" && m === "POST") {
       const b = req.postDataJSON();
+      lastCreatedLocation = b.location;
       assert.equal(b.currency, "USD");
       if (b.sportId === 1) {
         assert.equal(b.sponsoredSlots, 1);
@@ -224,7 +230,7 @@ const fs = require("node:fs"),
       assert.equal(b.revision, 1);
       assert.match(b.idempotencyKey, /^[a-f0-9-]{36}$/i);
       const paymentId =
-        (b.method === "WhishMock" ? "10000000" : "00000000") +
+        (b.method === "WhishMock" ? "10000000" : b.method === "WhishManual" ? "20000000" : "00000000") +
         "-0000-4000-8000-" +
         String(id).padStart(12, "0");
       if (b.method === "WhishMock") {
@@ -240,7 +246,7 @@ const fs = require("node:fs"),
         };
         paymentRecords.set(paymentId, data);
       } else {
-        assert.equal(b.method, "Cash");
+        assert(["Cash", "WhishManual"].includes(b.method));
         const state =
           id === 5
             ? { status: "Waitlisted", queuePosition: 1, paymentMethod: "Cash" }
@@ -251,13 +257,23 @@ const fs = require("node:fs"),
         data = {
           paymentId: state.status === "Waitlisted" ? null : paymentId,
           status: state.status === "Waitlisted" ? "Waitlisted" : "PendingCash",
-          mode: "Cash",
+          mode: b.method,
+          recipientNumber: b.method === "WhishManual" ? "+96171364432" : null,
+          gameId: id,
           amount: g.costPerPlayer,
           serviceFee: 0.3,
           totalAmount: g.costPerPlayer + 0.3,
           currency: "USD",
         };
+        if (b.method === "WhishManual") { data.status = "AwaitingTransfer"; paymentRecords.set(paymentId, data); }
       }
+    } else if (p === "/api/me/payments") {
+      data = { payments: [...paymentRecords.values()].filter(row => row.mode === "WhishManual").map(row => ({...row, sport:"Paintball", venue:"Adventure Arena"})), canReview:false };
+    } else if (/^\/api\/payments\/[a-f0-9-]+\/transfer$/.test(p)) {
+      const paymentId = p.split("/")[3];
+      assert.equal(req.postDataJSON().reference, "WHISH-TEST-123");
+      data = {...paymentRecords.get(paymentId), status:"AwaitingVerification", transferReference:"WHISH-TEST-123"};
+      paymentRecords.set(paymentId, data);
     } else if (/^\/api\/payments\/[a-f0-9-]+\/mock-complete$/.test(p)) {
       const paymentId = p.split("/")[3];
       data = { ...paymentRecords.get(paymentId), status: "MockSucceeded" };
@@ -355,6 +371,21 @@ const fs = require("node:fs"),
       .getByRole("heading", { name: `${sport} at ${venue}`, exact: true })
       .waitFor();
   }
+  // Explicit Google library fixture; no real Google request or credential is used.
+  await page.addInitScript(() => {
+    const point = {lat:() => 33.89, lng:() => 35.5};
+    class MapFixture {
+      constructor(element) { this.element = element; }
+      addListener(type, callback) { const button = document.createElement("button"); button.type="button"; button.textContent="Choose fixture pin"; button.onclick=() => callback({latLng:point}); this.element.appendChild(button); return {remove:() => button.remove()}; }
+      setCenter() {} setZoom() {}
+    }
+    class MarkerFixture { constructor(options) { Object.assign(this, options); } addListener() {} }
+    const Place = {searchByText: async request => { window.__mapsSearch = request; return {places:[
+      {id:"fixture-lb", displayName:"Lebanese Court Fixture", formattedAddress:"Beirut, Lebanon", location:point, addressComponents:[{types:["country"],shortText:"LB"}],googleMapsURI:"https://www.google.com/maps/search/?api=1&query=Beirut"},
+      {id:"fixture-foreign", displayName:"Outside Lebanon Fixture", formattedAddress:"Outside", location:point, addressComponents:[{types:["country"],shortText:"SY"}]}
+    ]}; }};
+    window.google = {maps:{importLibrary:async name => name === "maps" ? {Map:MapFixture} : name === "marker" ? {AdvancedMarkerElement:MarkerFixture} : {Place}}};
+  });
   await page.goto(process.env.GAMEON_UI_URL || "http://127.0.0.1:5173");
   await page
     .getByRole("heading", { name: "Less scrolling. More playing." })
@@ -365,6 +396,15 @@ const fs = require("node:fs"),
     .waitFor();
   assert.equal(await page.locator(".sponsored-label").count(), 2);
   assert.equal(await page.locator(".type-chips button").count(), 18);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  await page.reload();
+  await page.locator(".game-card").nth(4).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  await page.screenshot({ path: path.join(os.tmpdir(), "GameOn-light.png"), fullPage: true });
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--page").trim()), "#0f172a");
   await page.screenshot({
     path: path.join(os.tmpdir(), "GameOn-desktop.png"),
     fullPage: true,
@@ -488,6 +528,26 @@ const fs = require("node:fs"),
     .click();
   await page.getByText(/DEMO Whish — no real charge/).waitFor();
 
+  await page.getByRole("button", { name: "Leave game / waitlist" }).click();
+  await page.getByRole("button", { name: "Join this event", exact:true }).click();
+  await page.getByRole("radio", { name: /Whish Money transfer/ }).check();
+  await page.getByRole("button", { name: "Reserve & show Whish instructions" }).click();
+  await page.getByRole("heading", { name: "Your place is reserved. Transfer with Whish." }).waitFor();
+  assert.equal(await page.locator(".transfer-number a").textContent(), "+96171364432");
+  await page.locator(".checkout-dialog").screenshot({path:path.join(os.tmpdir(),"GameOn-manual-whish.png")});
+  await page.getByLabel("Whish transfer reference").fill("WHISH-TEST-123");
+  await page.getByRole("button", { name: "I transferred — submit reference" }).click();
+  await page.getByText("Awaiting verification", {exact:true}).waitFor();
+  await page.getByRole("button", { name: "Close checkout" }).click();
+  await page.getByRole("button", { name: "Payments", exact:true }).click();
+  await page.getByText(/Paintball at Adventure Arena · USD 15.3 · Awaiting verification/).waitFor();
+  await page.locator(".payment-record summary").click();
+  await page.getByText("Awaiting verification", {exact:true}).waitFor();
+  assert.equal(await page.getByRole("heading", {name:"Whish transfer reviews"}).count(), 0);
+  await discover();
+  await page.locator(".venue-discovery summary").click();
+  await page.locator(".venue-discovery input").fill("Tripoli");
+  assert.match(await page.getByRole("link", {name:"Open Google Maps ↗", exact:true}).getAttribute("href"), /Tripoli/);
   await page.getByRole("button", { name: /Sign out/ }).click();
   await login("maria@example.invalid", "Maria");
   await page.getByRole("button", { name: /Inbox/ }).click();
@@ -530,10 +590,39 @@ const fs = require("node:fs"),
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await page.locator(".live-dot").evaluate(el => getComputedStyle(el).animationName), "none");
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  mapsEnabled = true;
+  await page.setViewportSize({width:1440,height:1080});
+  await page.reload();
+  await page.locator(".game-card").first().waitFor();
+  await page.locator(".type-chips button").filter({hasText:"Basketball"}).click();
+  await page.locator(".venue-discovery summary").click();
+  await page.locator(".venue-discovery").getByRole("button",{name:"Search venues",exact:true}).click();
+  await page.getByText("Lebanese Court Fixture",{exact:true}).waitFor();
+  assert.equal(await page.getByText("Outside Lebanon Fixture",{exact:true}).count(),0);
+  assert.match(await page.evaluate(() => window.__mapsSearch.textQuery), /basketball court rental/);
+  await page.getByRole("button", {name:"+ Host event",exact:true}).click();
+  await page.getByLabel("Sport or activity type").selectOption("1");
+  await page.getByRole("button", {name:"Continue →"}).click();
+  await page.getByLabel("Date & time (your local time)").fill(future.slice(0,16));
+  await page.getByText("Find Basketball venues in Lebanon", {exact:true}).click();
+  await page.getByLabel("Choose my own location on Google Maps").check();
+  await page.getByRole("button", {name:"Choose fixture pin",exact:true}).click();
+  await page.getByLabel("Selected location name").fill("My chosen court");
+  await page.getByRole("button", {name:"Continue →"}).click();
+  await page.getByLabel("Host-covered places").fill("1");
+  await page.getByRole("button", {name:"Publish event →"}).click();
+  await page.getByRole("heading", {name:"Basketball at Central Court",exact:true}).waitFor();
+  assert.equal(lastCreatedLocation.name,"My chosen court");
+  assert.equal(lastCreatedLocation.latitude,33.89);
+  assert.equal(lastCreatedLocation.longitude,35.5);
   assert.deepEqual(errors, []);
   await browser.close();
   console.log(
-    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, cash fee breakdown, signed-demo checkout UI, waitlist, notifications and mobile layout (API fixtures).",
+    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, cash fee breakdown, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
   );
 })().catch((error) => {
   console.error(error);

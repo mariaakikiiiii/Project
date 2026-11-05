@@ -1,3 +1,5 @@
+> Latest: [Update 16](UPDATE-16.md) adds the new theme, venue maps and manual Whish transfers. Follow that guide after version 13. Automated merchant checkout remains unconnected.
+
 # GameOn platform upgrade — existing Windows installation
 
 **Commercial update:** once version 9 is installed, apply `13-commercial-layer.sql` in SQLCMD Mode. Optional demo campaigns use `14-sponsored-demo-seed.sql`. Follow [COMMERCIAL.md](COMMERCIAL.md) for 2% fee policy and safe mock checkout.

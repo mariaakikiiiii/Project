@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import ManualWhish from "./ManualWhish";
 const money = (amount, currency) =>
   new Intl.NumberFormat("en-LB", {
     style: "currency",
@@ -42,6 +43,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
       if (result.status === "MockSucceeded")
         onComplete("Demo payment already verified. No real money was charged.");
       else if (result.status === "MockPending") setPayment(result);
+      else if (result.mode === "WhishManual") setPayment(result);
       else if (["PendingCash", "Joined", "Waitlisted"].includes(result.status))
         onComplete(
           result.status === "Waitlisted"
@@ -186,6 +188,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
                 </span>
                 <span className="pill">Mock</span>
               </label>
+              {config.manualWhishAvailable && <label className={`payment-choice ${method === "WhishManual" ? "chosen" : ""}`}><input type="radio" name="checkoutMethod" checked={method === "WhishManual"} disabled={quote.isFull} onChange={() => setMethod("WhishManual")}/><span><strong>Whish Money transfer</strong><small>Reserve first, then send to {config.manualWhishRecipient}. Manually verified.</small></span></label>}
             </fieldset>
           )}
           {payment?.mode === "WhishMock" && (
@@ -205,6 +208,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
               </p>
             </div>
           )}
+          {payment?.mode === "WhishManual" && <ManualWhish payment={payment} onUpdate={setPayment}/>}
           {!payment ? (
             <button
               className="primary full"
@@ -217,6 +221,7 @@ export default function CheckoutModal({ game, config, onClose, onComplete }) {
                   ? "Join waitlist — no payment now"
                   : method === "WhishMock"
                     ? "Initialize mock Whish checkout"
+                    : method === "WhishManual" ? "Reserve & show Whish instructions"
                     : "Confirm cash reservation"}
             </button>
           ) : payment.status === "MockPending" ? (

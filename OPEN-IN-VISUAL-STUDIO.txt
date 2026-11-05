@@ -1,3 +1,5 @@
+LATEST UPDATE: read docs/UPDATE-16.md. Existing databases need migration 16 before running the updated API. Do not reinstall the database.
+
 GameOn — Open in Visual Studio
 
 1. Extract the ZIP.

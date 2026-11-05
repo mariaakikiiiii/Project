@@ -27,4 +27,6 @@ export const availableCovered = (game) =>
 export const playable = (game) =>
   game.gameStatus === "Open" && dateOf(game.startsAt) > new Date();
 export const mapQuery = (game) =>
-  [game.venue, game.address, game.area, "Lebanon"].filter(Boolean).join(", ");
+  game.latitude != null && game.longitude != null
+    ? `${game.latitude},${game.longitude}`
+    : [game.venue, game.address, game.area, "Lebanon"].filter(Boolean).join(", ");

@@ -2,7 +2,10 @@ import React, { useRef, useState } from "react";
 import { api } from "../api";
 import { localInput } from "../domain";
 import CategoryTabs from "./CategoryTabs";
-export default function EventWizard({ lookups, existing, onSaved, onBack }) {
+import VenueMap from "./VenueMap";
+export default function EventWizard({ lookups, existing, onSaved, onBack, config = {} }) {
+  const [customLocation, setCustomLocation] = useState(null), [useMap, setUseMap] = useState(false);
+  const [finderOpen, setFinderOpen] = useState(false);
   const initialType = lookups.sports.find(
     (t) => t.sportId === existing?.sportId,
   );
@@ -33,6 +36,10 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
       setError("Choose a sport or activity first.");
       return;
     }
+    if (step === 1 && useMap && !customLocation?.name?.trim()) {
+      setError("Choose a map pin and enter its location name before continuing.");
+      return;
+    }
     setError("");
     setStep((s) => s + 1);
   }
@@ -52,7 +59,9 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
         currency: form.currency,
         sponsoredSlots: Number(form.sponsored),
         revision: existing?.revision,
+        location: useMap ? customLocation : null,
       };
+      if (useMap && !customLocation?.name?.trim()) throw new Error("Choose a map location and give it a name.");
       const result = await api(
         existing ? `/games/${existing.gameId}` : "/games",
         existing ? "PUT" : "POST",
@@ -72,16 +81,13 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
       </button>
       <span className="overline">HOST SOMETHING WORTH SHOWING UP FOR</span>
       <h1>
-        {existing
-          ? "Make it a better plan."
-          : "Your idea. Their next great day."}
+        {existing ? "Edit your event" : "Host an event"}
       </h1>
       <p className="lead">
-        A pickup match, a tactical mission, or a night at the lanes. Bring your
-        crew together.
+        Choose an activity, a place and a time. You are included in the player count.
       </p>
       <ol className="wizard-steps" aria-label="Event creation progress">
-        {["Choose your experience", "Make the plan", "Review & publish"].map(
+        {["Activity", "Time & place", "Price & publish"].map(
           (label, index) => (
             <li
               key={label}
@@ -182,10 +188,10 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
               Venue
               <select
                 aria-label="Venue"
-                required
+                required={!useMap}
                 name="venue"
                 value={form.venueId}
-                disabled={!!existing}
+                disabled={!!existing || useMap}
                 onChange={(e) => change("venueId", e.target.value)}
               >
                 <option value="">Choose a venue</option>
@@ -199,6 +205,10 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
                 <small>The existing venue is retained when editing.</small>
               )}
             </label>
+            {!existing && <div className="form-wide">
+              {config.mapsPickerAvailable && <label className="checkbox"><input type="checkbox" checked={useMap} onChange={e => setUseMap(e.target.checked)}/>Choose my own location on Google Maps</label>}
+              <details open={useMap || finderOpen} onToggle={e => setFinderOpen(e.currentTarget.open)}><summary>Find {subtype?.name || "activity"} venues in Lebanon</summary>{(useMap || finderOpen) && <VenueMap config={config} type={subtype?.name} onSelect={useMap ? setCustomLocation : undefined} value={useMap ? customLocation : null}/>}</details>
+            </div>}
             <p className="muted form-wide">
               You are included in the capacity. Venue availability must be
               confirmed with the operator before publishing.
@@ -215,7 +225,7 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
                 </span>
                 <strong>{subtype?.name}</strong>
                 <span>
-                  {venue?.name} · {new Date(form.start).toLocaleString()}
+                  {useMap ? customLocation?.name : venue?.name} · {new Date(form.start).toLocaleString()}
                 </span>
                 <span>{form.capacity} total places</span>
               </div>
@@ -276,9 +286,8 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
               <p>
                 A 2% platform service fee is added for new paid bookings and
                 shown to players at checkout. Free and host-covered places have
-                no player fee. Cash at the venue is available. Whish Money
-                checkout needs merchant activation before online payment can be
-                offered.
+                no player fee. Cash is settled with the host. Manual Whish
+                transfers, when enabled, are sent to GameOn and require verification.
               </p>
             </div>
           </>

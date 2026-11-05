@@ -12,6 +12,8 @@ using GameOn.Payments;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<MapsLocations>();
+builder.Services.AddHttpClient("maps", c => c.Timeout = TimeSpan.FromSeconds(12)).RemoveAllLoggers();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<MockPaymentSecurity>();
 builder.Services.AddSingleton<MockPaymentProcessor>();
@@ -75,7 +77,7 @@ app.Use(async (ctx, next) =>
     catch (SqlException ex) when (ex.Number is 50005)
     { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50003)
-    { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "Only the host can change this game." }); }
+    { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "You do not have permission to perform this action." }); }
     catch (SqlException ex) when (ex.Number is 50004)
     { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = "This game changed. Refresh to see the latest details and available places." }); }
     catch (SqlException ex) when (ex.Number is 50001)
@@ -176,18 +178,27 @@ app.MapGet("/api/games/{id:int}", async (int id, ClaimsPrincipal user, Database 
 }).RequireRateLimiting("browse");
 app.MapGet("/api/me/games", async (ClaimsPrincipal user, Database db, CancellationToken ct) =>
     Results.Ok((await db.Call("dbo.MyGames", ct, P("@UserId", SqlDbType.Int, UserId(user))))[0])).RequireAuthorization();
-app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database db, CancellationToken ct) =>
+app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database db, MapsLocations maps, CancellationToken ct) =>
 {
     if (!PlatformEndpoints.ValidGame(input.StartsAt, input.Capacity, input.Description, input.CostPerPlayer, input.Currency, input.SponsoredSlots))
         return Results.BadRequest(new { error = "Choose a future start and capacity from 2 to 100." });
+    VerifiedLocation? location = null;
+    if (input.Location is not null)
+    {
+        try { location = await maps.Verify(input.Location, ct); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
     var rows = (await db.Call("dbo.CreateGame", ct,
         P("@HostUserId", SqlDbType.Int, UserId(user)), P("@SportId", SqlDbType.Int, input.SportId),
-        P("@VenueId", SqlDbType.Int, input.VenueId), P("@StartsAt", SqlDbType.DateTime2, input.StartsAt.UtcDateTime),
+        P("@VenueId", SqlDbType.Int, location is null ? input.VenueId : 0), P("@StartsAt", SqlDbType.DateTime2, input.StartsAt.UtcDateTime),
         P("@Capacity", SqlDbType.SmallInt, input.Capacity), P("@Description", SqlDbType.NVarChar, input.Description ?? "", 1000),
         PlatformEndpoints.Price(input.CostPerPlayer), P("@Currency", SqlDbType.Char, input.Currency, 3),
-        P("@SponsoredSlots", SqlDbType.SmallInt, input.SponsoredSlots)))[0];
+        P("@SponsoredSlots", SqlDbType.SmallInt, input.SponsoredSlots),
+        P("@VenueName", SqlDbType.NVarChar, location?.Name, 120), P("@VenueArea", SqlDbType.NVarChar, location?.Area, 80),
+        P("@VenueAddress", SqlDbType.NVarChar, location?.Address, 250), MapsLocations.Coordinate("@Latitude", location?.Latitude),
+        MapsLocations.Coordinate("@Longitude", location?.Longitude), P("@GooglePlaceId", SqlDbType.NVarChar, null, 255)))[0];
     return Results.Created($"/api/games/{rows[0]["gameId"]}", rows[0]);
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("checkout");
 app.MapPost("/api/games/{id:int}/join", async (int id, JoinRequest? input, ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
     if (input?.PaymentMethod is not null and not "Cash" and not "Whish") return Results.BadRequest(new { error = "Unknown payment method." });
@@ -207,6 +218,6 @@ static bool ValidEmail(string? email) => email is not null && email.Length <= 25
     && System.Net.Mail.MailAddress.TryCreate(email.Trim(), out var address) && address.Address == email.Trim();
 record Register(string Email, string DisplayName, string Password);
 record Login(string Email, string Password);
-record NewGame(int SportId, int VenueId, DateTimeOffset StartsAt, short Capacity, string? Description = "", decimal CostPerPlayer = 0, string Currency = "USD", short SponsoredSlots = 0);
+record NewGame(int SportId, int VenueId, DateTimeOffset StartsAt, short Capacity, string? Description = "", decimal CostPerPlayer = 0, string Currency = "USD", short SponsoredSlots = 0, LocationInput? Location = null);
 
 record JoinRequest(string PaymentMethod = "Cash");

@@ -15,6 +15,11 @@ public static class PlatformEndpoints
         app.MapGet("/api/config", (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish, GameOn.Payments.MockPaymentSecurity mock) => Results.Ok(new
         {
             mapsEmbedApiKey = config["Maps:EmbedApiKey"] ?? "",
+            mapsBrowserApiKey = config["Maps:BrowserApiKey"] ?? "",
+            mapsMapId = config["Maps:MapId"] ?? "",
+            mapsPickerAvailable = !string.IsNullOrWhiteSpace(config["Maps:BrowserApiKey"]) && !string.IsNullOrWhiteSpace(config["Maps:ServerApiKey"]),
+            manualWhishAvailable = config.GetValue<bool>("Payments:ManualWhishEnabled"),
+            manualWhishRecipient = config.GetValue<bool>("Payments:ManualWhishEnabled") ? config["Payments:ManualWhishRecipient"] : null,
             passwordResetAvailable = email.Enabled,
             onlinePaymentsAvailable = whish.IsAvailable,
             payoutAvailable = false,

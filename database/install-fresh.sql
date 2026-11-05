@@ -19,5 +19,6 @@ GO
 :r database/09-categories-and-events.sql
 :r database/10-user-analytics-seed.sql
 :r database/13-commercial-layer.sql
-PRINT 'GameOn lab database installed. Run 05, 08, 12 and 15 tests on a disposable copy.';
+:r database/16-location-manual-whish.sql
+PRINT 'GameOn lab database installed. Run 05, 08, 12, 15 and 17 tests on a disposable copy.';
 GO

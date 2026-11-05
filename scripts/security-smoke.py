@@ -72,3 +72,12 @@ assert call("/payments/whish/mock/webhook/extra", "POST", {})[0] == 400
 print("PASS: checkout authentication boundary, unsigned-webhook rejection and exact CSRF exemption.")
 
 assert call("/payments/whish/mock/webhook", "PUT", {})[0] == 400
+
+for path, method in [("/me/payments", "GET"), ("/payments/reviews", "GET"),
+                     ("/payments/00000000-0000-4000-8000-000000000001/transfer", "POST"),
+                     ("/payments/00000000-0000-4000-8000-000000000001/review", "POST")]:
+    assert call(path, method, {} if method == "POST" else None)[0] == 401, path
+assert "serverApiKey" not in configuration and "Maps:ServerApiKey" not in configuration
+assert configuration["manualWhishAvailable"] is True
+assert configuration["manualWhishRecipient"] == "+96171364432"
+print("PASS: manual Whish payment/history/review routes deny anonymous callers; configuration exposes only the public recipient and browser map configuration.")

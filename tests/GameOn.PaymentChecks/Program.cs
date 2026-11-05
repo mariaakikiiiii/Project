@@ -33,7 +33,18 @@ var production = new MockPaymentSecurity(config, new TestEnvironment("Production
 Check(!production.Enabled && !production.Verify(body, signed.Timestamp, signed.Signature), "Production cannot enable mock checkout even with the flag set");
 var disabled = new MockPaymentSecurity(new ConfigurationBuilder().Build(), new TestEnvironment("Development"), time);
 Check(!disabled.Enabled, "mock checkout flag must be enabled explicitly");
-Console.WriteLine($"PASS: {passed} payment policy/security checks. No database or money movement involved.");
+// Fake Google responses: country validation is tested without credentials or network.
+var mapsConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?> { ["Maps:ServerApiKey"] = "fixture-key" }).Build();
+var maps = new MapsLocations(new MapsClientFactory("LB"), mapsConfig);
+var location = await maps.Verify(new LocationInput(" Host court ", 33.89, 35.5, null), CancellationToken.None);
+Check(location.Name == "Host court" && location.Area == "Beirut" && location.Latitude == 33.89m, "host location normalized from verified Lebanese pin");
+try { await new MapsLocations(new MapsClientFactory("SY"), mapsConfig).Verify(new LocationInput("Outside",33.89,35.5,null), CancellationToken.None); throw new InvalidOperationException("Foreign country accepted"); }
+catch (ArgumentException) { Check(true, "bounding rectangle alone cannot authorize a foreign-country pin"); }
+try { await maps.Verify(new LocationInput("Invalid", double.NaN,35.5,null), CancellationToken.None); throw new InvalidOperationException("Non-finite pin accepted"); }
+catch (ArgumentException) { Check(true, "non-finite coordinates rejected before Google request"); }
+var coordinate = MapsLocations.Coordinate("@Latitude",33.8912345m);
+Check(coordinate.Precision == 10 && coordinate.Scale == 7, "ADO.NET preserves pin precision with explicit decimal scale");
+Console.WriteLine($"PASS: {passed} payment policy/security and map-validation checks. No database, Google API calls or money movement involved.");
 sealed class TestClock : TimeProvider { public DateTimeOffset Now = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero); public override DateTimeOffset GetUtcNow() => Now; }
 sealed class TestEnvironment(string name) : IHostEnvironment
 {
@@ -41,4 +52,18 @@ sealed class TestEnvironment(string name) : IHostEnvironment
     public string ApplicationName { get; set; } = "GameOn.PaymentChecks";
     public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
     public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+}
+
+sealed class MapsClientFactory(string country) : IHttpClientFactory
+{
+ public HttpClient CreateClient(string name) => new(new MapsHandler(country));
+}
+sealed class MapsHandler(string country) : HttpMessageHandler
+{
+ protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+ {
+  if (request.RequestUri?.Host != "maps.googleapis.com" || request.Method != HttpMethod.Get) throw new InvalidOperationException("Unexpected map host or method");
+  var payload = System.Text.Json.JsonSerializer.Serialize(new {status="OK",results=new[]{new{formatted_address="Fixture, Beirut, Lebanon",address_components=new[]{new{long_name="Country",short_name=country,types=new[]{"country"}},new{long_name="Beirut",short_name="Beirut",types=new[]{"locality"}}}}}});
+  return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK){Content=new StringContent(payload)});
+ }
 }

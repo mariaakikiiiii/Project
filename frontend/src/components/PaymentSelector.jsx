@@ -1,5 +1,5 @@
 import React from "react";
-export default function PaymentSelector({ value, onChange, disabled = false }) {
+export default function PaymentSelector({ value, onChange, disabled = false, config = {} }) {
   return (
     <fieldset className="payment-selector" disabled={disabled}>
       <legend>How would you like to pay?</legend>
@@ -20,10 +20,10 @@ export default function PaymentSelector({ value, onChange, disabled = false }) {
       <label className="payment-choice unavailable">
         <input type="radio" name="paymentMethod" value="Whish" disabled />
         <span>
-          <strong>Whish Money</strong>
-          <small>Online checkout is not connected yet.</small>
+          <strong>Whish Money transfer</strong>
+          <small>{config.manualWhishAvailable ? `Choose Whish when joining a priced event, then send to ${config.manualWhishRecipient}. Transfers require manual verification.` : "Online checkout is not connected yet."}</small>
         </span>
-        <span className="pill">Not connected</span>
+        <span className="pill">{config.manualWhishAvailable ? "At checkout" : "Not connected"}</span>
       </label>
       <p className="muted">
         A reservation is not a payment receipt. No funds are collected through

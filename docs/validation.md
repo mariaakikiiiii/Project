@@ -57,3 +57,14 @@ The final GameOn.sln includes the API, database-check project, and virtual solut
 - Production frontend bundle built successfully at about 73 KB gzip JavaScript and 7 KB gzip CSS. These are artifact sizes, not throughput/latency measurements.
 
 Not executed: live migration 13, actual SQL cash/idempotency transitions, real concurrent mock confirmations, campaign query execution and signed-positive HTTP-to-database completion. database/15-commercial-tests.sql and the extended guarded database runner cover those when a disposable SQL Server is available. No real Whish endpoints were called. Cash is awaiting physical payment; MockSucceeded is explicitly a demo, never a real paid receipt. Mock operation is enabled only in Development/Testing and requires an explicit flag.
+
+
+## Update 16 verification (2026-11-05)
+
+- .NET solution build: passed, zero warnings/errors, serialized MSBuild.
+- React/Vite production build: passed.
+- Chromium browser regression: passed with explicit application API fixtures and a Google library fixture. Covers dark-by-default, persistent light choice across reload, reduced motion, mobile overflow, existing 17-type discovery/hosting/booking flows, manual Whish recipient and reference submission, pending verification/history, external Google Maps search, country-filtered listing rendering, and host custom-pin payloads. A listener bug when enabling host selection on an already loaded map was found and fixed.
+- 23 payment/security/map checks: passed. Fee rounding and mock HMAC checks use no database. Google country/coordinate validation uses fake HTTP responses and explicit decimal parameter precision checks; it does not call Google.
+- API HTTPS middleware smoke: passed, including anonymous denial for payment history, transfer submission and operator review routes; server map key absent from public configuration. This is not a database role/ownership integration test.
+- Microsoft ScriptDom parsed all SQL scripts, including migrations 16 and tests 17. No SQL Server engine is available here. Script 17 (manual booking idempotency, submission, operator authorization/audit and cancellation reconciliation) is provided for a disposable SQL Server copy and has **not** been executed on an engine.
+- No live Google Maps/Places/Geocoding call, real Whish transfer, refund or merchant checkout execution occurred. Those integrations require owner configuration and live/sandbox validation. Receiving a transfer reference never automatically marks a payment verified.

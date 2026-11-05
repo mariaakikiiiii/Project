@@ -10,11 +10,13 @@ import {
   mapQuery,
 } from "./domain";
 import "./style.css";
+import "./theme.css";
 import CheckoutModal from "./components/CheckoutModal";
 import SponsoredVenues from "./components/SponsoredVenues";
+import VenueMap from "./components/VenueMap";
+import PaymentHistory from "./components/PaymentHistory";
 import CategoryTabs from "./components/CategoryTabs";
 import GameForm from "./components/EventWizard";
-import PaymentSelector from "./components/PaymentSelector";
 
 function Mark({ name }) {
   const paths = {
@@ -169,7 +171,7 @@ function GameCard({ game: g, select, user }) {
         </div>
         <div className="card-bottom">
           <span
-            className={`pill ${g.gameStatus === "Cancelled" ? "danger" : ""}`}
+            className={`pill ${g.gameStatus === "Cancelled" || g.playerCount >= g.capacity ? "danger" : "availability"}`}
           >
             {g.gameStatus === "Cancelled"
               ? "Cancelled"
@@ -189,7 +191,8 @@ function GameCard({ game: g, select, user }) {
     </article>
   );
 }
-function Feed({ lookups, user, select, navigate, revision }) {
+function Feed({ lookups, user, select, navigate, revision, config }) {
+  const [venueFinderOpen, setVenueFinderOpen] = useState(false);
   const [filters, setFilters] = useState({
     sportId: "",
     category: "",
@@ -330,6 +333,7 @@ function Feed({ lookups, user, select, navigate, revision }) {
         )}
       </div>
       <CategoryTabs value={filters.category} onChange={category} />
+      <details className="venue-discovery" onToggle={e => setVenueFinderOpen(e.currentTarget.open)}><summary>Find courts & activity venues in Lebanon ↗</summary>{venueFinderOpen && <VenueMap config={config} type={lookups.sports.find(s => s.sportId === Number(filters.sportId))?.name}/>}</details>
       <label className="mobile-type-select">
         Sport or activity
         <select value={filters.sportId} onChange={(e) => sport(e.target.value)}>
@@ -494,6 +498,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
     return (
       <GameForm
         lookups={lookups}
+        config={config}
         existing={g}
         onSaved={() => {
           setEditing(false);
@@ -510,7 +515,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
         <CheckoutModal
           game={g}
           config={config}
-          onClose={() => setCheckoutOpen(false)}
+          onClose={() => { setCheckoutOpen(false); setVersion(v => v + 1); }}
           onComplete={(message) => {
             setCheckoutOpen(false);
             setVersion((v) => v + 1);
@@ -688,6 +693,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                   ? " · cash at venue"
                   : data.membership.paymentMethod === "WhishMock"
                     ? " · DEMO Whish — no real charge"
+                    : data.membership.paymentMethod === "WhishManual" ? " · Whish transfer — check Payments for status"
                     : ""}
               </p>
             )}
@@ -1032,19 +1038,19 @@ function Inbox({ notifications, select, refresh }) {
     </div>
   );
 }
-function Payments({ config }) {
-  const [choice, setChoice] = useState("Cash");
+function Payments({ config, user }) {
   return (
     <div className="form-page">
       <span className="overline">YOUR PLAN. YOUR PAYMENT CHOICE.</span>
-      <h1>Clear shares. Better plans.</h1>
+      <h1>Payments</h1>
       <p className="lead">
         Prices are shown in USD or LBP before you reserve. No currency
         conversion is performed.
       </p>
       <section className="panel">
         <h2>Cash or Whish</h2>
-        <PaymentSelector value={choice} onChange={setChoice} />
+        <p><strong>Cash in person</strong> — pay the host at the venue.</p>
+        <p><strong>Whish Money transfer</strong> — {config.manualWhishAvailable ? `choose Whish when booking, then follow the instructions to send to ${config.manualWhishRecipient}. GameOn checks transfers manually.` : "not currently available."}</p>
         <p>
           Cash is settled in person with the host. A host-covered place means
           your host pays your venue share.
@@ -1055,14 +1061,15 @@ function Payments({ config }) {
             {config.mockPaymentsAvailable
               ? "Try the clearly labeled mock Whish option in a priced event’s checkout. It simulates verification and transfers no real money."
               : "Mock Whish checkout is unavailable in this environment."}
-            Real Whish remains unconnected; a demo is never a real payment
-            receipt.
+            Automated Whish merchant checkout remains unconnected. Manual transfers
+            are separate; a demo is never a real payment receipt.
           </p>
           <p>
             GameOn does not collect your Whish password, PIN, or one-time codes.
           </p>
         </div>
       </section>
+      {user && <PaymentHistory/>}
     </div>
   );
 }
@@ -1243,6 +1250,15 @@ function Auth({ config, onLogin }) {
   );
 }
 function App() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "dark");
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    document.documentElement.style.backgroundColor = next === "light" ? "#f3f6fb" : "#0f172a";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#f3f6fb" : "#0f172a");
+    setTheme(next);
+    try { localStorage.setItem("gameon-theme", next); } catch { /* Storage is optional. */ }
+  }
   const [page, setPage] = useState(
       new URLSearchParams(location.search).has("reset") ? "auth" : "discover",
     ),
@@ -1347,6 +1363,7 @@ function App() {
     ["mine", "My games"],
     ["inbox", "Inbox"],
     ["profile", "My profile"],
+    ["payments", "Payments"],
   ];
   return (
     <>
@@ -1382,6 +1399,9 @@ function App() {
           ))}
         </nav>
         <div className="header-actions">
+          <button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+            {theme === "dark" ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 13a9 9 0 0 1-9.8-9.8A9 9 0 1 0 20.8 13Z"/></svg>}
+          </button>
           <button className="primary small" onClick={() => navigate("host")}>
             + Host event
           </button>
@@ -1406,6 +1426,7 @@ function App() {
           <>
             {page === "discover" && (
               <Feed
+                config={config}
                 lookups={lookups}
                 user={user}
                 select={select}
@@ -1428,6 +1449,7 @@ function App() {
             {page === "host" && user && (
               <GameForm
                 lookups={lookups}
+                config={config}
                 onBack={() => navigate("discover")}
                 onSaved={(id) => {
                   notify("Your event is live. Time to find your crew.");
@@ -1454,7 +1476,7 @@ function App() {
                 refresh={refreshInbox}
               />
             )}{" "}
-            {page === "payments" && <Payments config={config} />}
+            {page === "payments" && <Payments config={config} user={user} />}
             {page === "auth" && (
               <Auth
                 config={config}
@@ -1469,6 +1491,7 @@ function App() {
           </>
         )}
       </main>
+      {page !== "host" && page !== "auth" && <button className="primary floating-host" onClick={() => navigate("host")} aria-label="Create an event">+ Host event</button>}
       <footer>
         <button className="brand" onClick={() => navigate("discover")}>
           game<span>on</span>

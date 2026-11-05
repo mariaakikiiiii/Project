@@ -1,3 +1,7 @@
+# Latest update
+
+Dark/light themes, Lebanon venue search and manual Whish transfers: follow [the update 16 instructions](docs/UPDATE-16.md) for an existing installation. This update requires SQL migration 16. Embedded Google Maps requires your own restricted Google keys; Whish references require manual operator verification.
+
 # GameOn
 
 **Commercial layer:** [apply migration 13 and try 2% checkout, mock Whish and sponsored venues](docs/COMMERCIAL.md). Real Whish execution remains disabled; the local demo never transfers money.
