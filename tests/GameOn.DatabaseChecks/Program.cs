@@ -99,6 +99,30 @@ try
     Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Participations WHERE GameId=@Game AND UserId=@User", false, P("@Game", SqlDbType.Int, coveredGame), P("@User", SqlDbType.Int, users[3]))) == 0, "failed payment attempt leaves no participation");
     await Query("dbo.CancelGame", true, P("@GameId", SqlDbType.Int, coveredGame), P("@HostUserId", SqlDbType.Int, users[0]));
     await Expect(50002, () => Join(coveredGame, users[3]), "cancelled event rejects joins");
+    if (Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.PlatformMigrations WHERE Version=13", false)) == 1)
+    {
+        var payGame = await Create(activity, 2, 0, 0.25m);
+        async Task<Guid> Init(int user, string mode, Guid key) => (Guid)(await Query("dbo.InitializeCheckout", true,
+            P("@GameId", SqlDbType.Int, payGame), P("@UserId", SqlDbType.Int, user), P("@Mode", SqlDbType.VarChar, mode, 12),
+            P("@IdempotencyKey", SqlDbType.UniqueIdentifier, key), P("@ExpectedRevision", SqlDbType.Int, 1)))!;
+        var firstPayment = await Init(users[1], "WhishMock", Guid.NewGuid());
+        var secondPayment = await Init(users[2], "WhishMock", Guid.NewGuid());
+        Check(await Query("dbo.GetPayment",true,P("@PaymentID",SqlDbType.UniqueIdentifier,firstPayment),P("@UserId",SqlDbType.Int,users[3])) is null,"payment lookup does not expose another user's checkout");
+        var firstEvent = Guid.NewGuid(); var secondEvent = Guid.NewGuid();
+        var firstHash = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        var secondHash = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        Task<object?> Confirm(Guid payment, Guid webhook, byte[] hash, decimal total) => Query("dbo.ApplyMockPaymentWebhook", true,
+            P("@WebhookEventID", SqlDbType.UniqueIdentifier, webhook), P("@PaymentID", SqlDbType.UniqueIdentifier, payment),
+            P("@GatewayTransactionID", SqlDbType.NVarChar, "mock_test_" + payment.ToString("N"), 128),
+            P("@Outcome", SqlDbType.VarChar, "success", 12), new SqlParameter("@TotalAmount", SqlDbType.Decimal) { Precision=12,Scale=2,Value=total },
+            P("@Currency", SqlDbType.Char, "USD", 3), P("@PayloadHash", SqlDbType.Binary, hash, 32));
+        await Task.WhenAll(Confirm(firstPayment,firstEvent,firstHash,0.26m),Confirm(secondPayment,secondEvent,secondHash,0.26m));
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Payments WHERE GameID=@Game AND Status='MockSucceeded'", false,P("@Game",SqlDbType.Int,payGame)))==1,"two mock confirmations cannot both claim last spot");
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.Participations WHERE GameId=@Game",false,P("@Game",SqlDbType.Int,payGame)))==2,"mock confirmation preserves capacity");
+        await Confirm(firstPayment,firstEvent,firstHash,0.26m);
+        Check(Convert.ToInt32(await Query("SELECT COUNT(*) FROM dbo.PaymentWebhookEvents WHERE PaymentID=@Payment",false,P("@Payment",SqlDbType.UniqueIdentifier,firstPayment)))==1,"identical webhook replay has one stored event");
+        await Expect(50002,()=>Confirm(firstPayment,Guid.NewGuid(),firstHash,99m),"signed callback with mismatched amount rejected");
+    }
     Console.WriteLine($"PASS: {passed} database checks executed.");
     return 0;
 }
@@ -106,6 +130,6 @@ catch (Exception e) { Console.WriteLine("FAIL: " + e.GetType().Name + (e is SqlE
 finally
 {
     foreach (var id in games)
-        await Query("DELETE dbo.UserActivityLogs WHERE EventId=@Id; DELETE dbo.Notifications WHERE GameId=@Id; DELETE dbo.GameActivityLogs WHERE GameId=@Id; DELETE dbo.Waitlists WHERE GameId=@Id; DELETE dbo.Participations WHERE GameId=@Id; DELETE dbo.GamesAndEvents WHERE EventId=@Id;", false, P("@Id", SqlDbType.Int, id));
+        await Query("IF OBJECT_ID('dbo.Payments') IS NOT NULL BEGIN DELETE dbo.PaymentWebhookEvents WHERE PaymentID IN(SELECT PaymentID FROM dbo.Payments WHERE GameID=@Id); DELETE dbo.Payments WHERE GameID=@Id; END; DELETE dbo.UserActivityLogs WHERE EventId=@Id; DELETE dbo.Notifications WHERE GameId=@Id; DELETE dbo.GameActivityLogs WHERE GameId=@Id; DELETE dbo.Waitlists WHERE GameId=@Id; DELETE dbo.Participations WHERE GameId=@Id; DELETE dbo.GamesAndEvents WHERE EventId=@Id;", false, P("@Id", SqlDbType.Int, id));
     foreach (var id in users) await Query("DELETE dbo.Users WHERE UserId=@Id", false, P("@Id", SqlDbType.Int, id));
 }

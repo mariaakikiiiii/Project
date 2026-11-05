@@ -90,6 +90,7 @@ const fs = require("node:fs"),
     cancelled = false,
     cashJoined = false,
     queued = false;
+  const paymentRecords = new Map();
   const memberships = new Map(),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -116,12 +117,31 @@ const fs = require("node:fs"),
         ],
         venues: [{ venueId: 1, name: "Central Court", area: "Beirut" }],
       };
+    else if (p === "/api/venues/sponsored")
+      data = [
+        {
+          venueId: 1,
+          name: "Central Court",
+          area: "Beirut",
+          address: "Fixture venue address",
+          tier: "Gold",
+        },
+        {
+          venueId: 2,
+          name: "North Field",
+          area: "Jounieh",
+          address: "Fixture field",
+          tier: "Silver",
+        },
+      ];
     else if (p === "/api/config")
       data = {
         mapsEmbedApiKey: "",
         passwordResetAvailable: false,
         onlinePaymentsAvailable: false,
         payoutAvailable: false,
+        mockPaymentsAvailable: true,
+        serviceFeeRate: 0.02,
       };
     else if (p === "/api/csrf") data = { token: "ui-fixture-token" };
     else if (p === "/api/auth/me") {
@@ -183,6 +203,69 @@ const fs = require("node:fs"),
               ? { status: "Joined", paymentMethod: "Cash" }
               : memberships.get(key(id)) || null,
         };
+    } else if (/^\/api\/games\/\d+\/quote$/.test(p)) {
+      const id = Number(p.split("/")[3]),
+        g = events.find((g) => g.gameId === id);
+      data = {
+        gameId: id,
+        amount: g.costPerPlayer,
+        serviceFee: 0.3,
+        totalAmount: g.costPerPlayer + 0.3,
+        currency: g.currency,
+        revision: g.revision,
+        isFull: g.playerCount >= g.capacity,
+        alreadyEnrolled: memberships.has(key(id)),
+        isOpen: g.gameStatus === "Open",
+      };
+    } else if (/^\/api\/games\/\d+\/checkout$/.test(p)) {
+      const id = Number(p.split("/")[3]),
+        g = events.find((g) => g.gameId === id),
+        b = req.postDataJSON();
+      assert.equal(b.revision, 1);
+      assert.match(b.idempotencyKey, /^[a-f0-9-]{36}$/i);
+      const paymentId =
+        (b.method === "WhishMock" ? "10000000" : "00000000") +
+        "-0000-4000-8000-" +
+        String(id).padStart(12, "0");
+      if (b.method === "WhishMock") {
+        data = {
+          paymentId,
+          gameId: id,
+          amount: g.costPerPlayer,
+          serviceFee: 0.3,
+          totalAmount: g.costPerPlayer + 0.3,
+          currency: "USD",
+          mode: "WhishMock",
+          status: "MockPending",
+        };
+        paymentRecords.set(paymentId, data);
+      } else {
+        assert.equal(b.method, "Cash");
+        const state =
+          id === 5
+            ? { status: "Waitlisted", queuePosition: 1, paymentMethod: "Cash" }
+            : { status: "Joined", paymentMethod: "Cash" };
+        memberships.set(key(id), state);
+        if (id === 5) queued = true;
+        else cashJoined = true;
+        data = {
+          paymentId: state.status === "Waitlisted" ? null : paymentId,
+          status: state.status === "Waitlisted" ? "Waitlisted" : "PendingCash",
+          mode: "Cash",
+          amount: g.costPerPlayer,
+          serviceFee: 0.3,
+          totalAmount: g.costPerPlayer + 0.3,
+          currency: "USD",
+        };
+      }
+    } else if (/^\/api\/payments\/[a-f0-9-]+\/mock-complete$/.test(p)) {
+      const paymentId = p.split("/")[3];
+      data = { ...paymentRecords.get(paymentId), status: "MockSucceeded" };
+      paymentRecords.set(paymentId, data);
+      memberships.set(key(data.gameId), {
+        status: "Joined",
+        paymentMethod: "WhishMock",
+      });
     } else if (/^\/api\/games\/\d+\/join$/.test(p)) {
       const id = Number(p.split("/")[3]);
       assert.equal(req.postDataJSON().paymentMethod, "Cash");
@@ -277,6 +360,10 @@ const fs = require("node:fs"),
     .getByRole("heading", { name: "Less scrolling. More playing." })
     .waitFor();
   await page.locator(".game-card").nth(4).waitFor();
+  await page
+    .getByRole("heading", { name: "Local spots. In the spotlight." })
+    .waitFor();
+  assert.equal(await page.locator(".sponsored-label").count(), 2);
   assert.equal(await page.locator(".type-chips button").count(), 18);
   await page.screenshot({
     path: path.join(os.tmpdir(), "GameOn-desktop.png"),
@@ -346,7 +433,7 @@ const fs = require("node:fs"),
     await page.getByRole("button", { name: "Edit game", exact: true }).count(),
     0,
   );
-  assert(await page.getByRole("radio", { name: /Whish Money/ }).isDisabled());
+
   await page.getByRole("button", { name: "Claim a free place ↗" }).click();
   await page
     .getByText("Playing with a host-covered place", { exact: true })
@@ -356,6 +443,9 @@ const fs = require("node:fs"),
   await open("Bowling", "Central Court");
   await page
     .getByRole("button", { name: "FULL — Join Waitlist", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Join waitlist — no payment now" })
     .click();
   await page.getByText(/Waitlisted · position #1/).waitFor();
   assert(queued);
@@ -368,8 +458,36 @@ const fs = require("node:fs"),
   await page
     .getByRole("button", { name: "Join this event", exact: true })
     .click();
+  const checkout = page.getByRole("dialog", { name: "Review your booking" });
+  await checkout
+    .getByText("Platform service fee (2%)", { exact: true })
+    .waitFor();
+  assert.match(
+    (await checkout.locator("dd").allTextContents()).join(" "),
+    /15\.30/,
+  );
+  await checkout.screenshot({path:path.join(os.tmpdir(),"GameOn-checkout.png")});
+  await checkout
+    .getByRole("button", { name: "Confirm cash reservation" })
+    .click();
   await page.getByText(/Your place is confirmed · cash at venue/).waitFor();
   assert(cashJoined);
+  await page.getByRole("button", { name: "Leave game / waitlist" }).click();
+  await page
+    .getByRole("button", { name: "Join this event", exact: true })
+    .click();
+  await page.getByRole("radio", { name: /Whish Pay — demo/ }).check();
+  await page
+    .getByRole("button", { name: "Initialize mock Whish checkout" })
+    .click();
+  await page
+    .getByText("Mock Whish checkout initialized", { exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Simulate Whish payment — no real charge" })
+    .click();
+  await page.getByText(/DEMO Whish — no real charge/).waitFor();
+
   await page.getByRole("button", { name: /Sign out/ }).click();
   await login("maria@example.invalid", "Maria");
   await page.getByRole("button", { name: /Inbox/ }).click();
@@ -415,7 +533,7 @@ const fs = require("node:fs"),
   assert.deepEqual(errors, []);
   await browser.close();
   console.log(
-    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, cash reservation, Whish unavailable state, waitlist, notifications and mobile layout (API fixtures).",
+    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, cash fee breakdown, signed-demo checkout UI, waitlist, notifications and mobile layout (API fixtures).",
   );
 })().catch((error) => {
   console.error(error);

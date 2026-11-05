@@ -10,6 +10,8 @@ import {
   mapQuery,
 } from "./domain";
 import "./style.css";
+import CheckoutModal from "./components/CheckoutModal";
+import SponsoredVenues from "./components/SponsoredVenues";
 import CategoryTabs from "./components/CategoryTabs";
 import GameForm from "./components/EventWizard";
 import PaymentSelector from "./components/PaymentSelector";
@@ -153,7 +155,7 @@ function GameCard({ game: g, select, user }) {
           <span>
             <strong>{g.playerCount}</strong> / {g.capacity} players
           </span>
-          <strong>{price(g)}</strong>
+          <strong>{g.isSponsored ? "Host-covered · Free" : price(g)}</strong>
         </div>
         <div
           className="capacity"
@@ -227,8 +229,21 @@ function Feed({ lookups, user, select, navigate, revision }) {
   const visibleTypes = lookups.sports.filter(
     (t) => !filters.category || t.categorySlug === filters.category,
   );
+  function exploreSponsored(area) {
+    const next = { ...filters, area };
+    setFilters(next);
+    setQuery(
+      new URLSearchParams(
+        Object.entries(next).filter(([, v]) => v !== "" && v !== false),
+      ).toString(),
+    );
+    document
+      .getElementById("discover-filters")
+      ?.scrollIntoView({ behavior: "smooth" });
+  }
   return (
     <>
+      <SponsoredVenues onExplore={exploreSponsored} />
       <section className="hero">
         <div className="hero-copy">
           <span className="overline">
@@ -436,7 +451,7 @@ function Feed({ lookups, user, select, navigate, revision }) {
 function Details({ id, user, config, select, navigate, lookups, notify }) {
   const [version, setVersion] = useState(0),
     [busy, setBusy] = useState(false),
-    [paymentMethod, setPaymentMethod] = useState("Cash"),
+    [checkoutOpen, setCheckoutOpen] = useState(false),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(false),
     [confirmCancel, setConfirmCancel] = useState(false);
@@ -453,7 +468,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
       const result = await api(
         `/games/${id}${path}`,
         method,
-        path === "/join" ? { paymentMethod } : undefined,
+        path === "/join" ? { paymentMethod: "Cash" } : undefined,
       );
       notify(result.message || message);
       setVersion((v) => v + 1);
@@ -471,7 +486,10 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
     host = user?.userId === g.hostUserId,
     member = data.roster.some((p) => p.userId === user?.userId),
     covered = availableCovered(g),
-    queued = data.membership?.status === "Waitlisted";
+    queued = data.membership?.status === "Waitlisted",
+    sponsoredMember = data.roster.some(
+      (p) => p.userId === user?.userId && p.isSponsored,
+    );
   if (editing)
     return (
       <GameForm
@@ -488,6 +506,18 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
   const query = mapQuery(g);
   return (
     <>
+      {checkoutOpen && (
+        <CheckoutModal
+          game={g}
+          config={config}
+          onClose={() => setCheckoutOpen(false)}
+          onComplete={(message) => {
+            setCheckoutOpen(false);
+            setVersion((v) => v + 1);
+            notify(message);
+          }}
+        />
+      )}
       <button className="text-link back" onClick={() => navigate("discover")}>
         ← Back to games
       </button>
@@ -609,7 +639,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
         <aside>
           <section className="panel booking">
             <span className="overline">YOUR NEXT GOOD GAME</span>
-            <h2>{price(g)}</h2>
+            <h2>{sponsoredMember ? "Your place is covered" : price(g)}</h2>
             <p className="muted">
               {Number(g.costPerPlayer)
                 ? "Venue share per player · settle directly with the host."
@@ -656,19 +686,22 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                   : "Your place is confirmed"}
                 {data.membership.paymentMethod === "Cash"
                   ? " · cash at venue"
-                  : ""}
+                  : data.membership.paymentMethod === "WhishMock"
+                    ? " · DEMO Whish — no real charge"
+                    : ""}
               </p>
             )}
-            {playable(g) &&
-              !member &&
-              !queued &&
-              Number(g.costPerPlayer) > 0 && (
-                <PaymentSelector
-                  value={paymentMethod}
-                  onChange={setPaymentMethod}
-                  disabled={busy}
-                />
-              )}
+            {Number(g.costPerPlayer) > 0 && !sponsoredMember && (
+              <p className="muted">
+                A 2% platform service fee applies when you get a place. Review
+                the exact total at checkout.
+              </p>
+            )}
+            {sponsoredMember && (
+              <p className="muted">
+                Your host-covered place is free, with no platform fee.
+              </p>
+            )}
             {playable(g) ? (
               <>
                 {!member && !queued && (
@@ -676,13 +709,17 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     className="primary full"
                     disabled={busy}
                     onClick={() =>
-                      act(
-                        "/join",
-                        "POST",
-                        g.playerCount >= g.capacity
-                          ? "You are on the waitlist."
-                          : "Your place is confirmed.",
-                      )
+                      !user
+                        ? navigate("auth")
+                        : Number(g.costPerPlayer) > 0
+                          ? setCheckoutOpen(true)
+                          : act(
+                              "/join",
+                              "POST",
+                              g.playerCount >= g.capacity
+                                ? "You are on the waitlist."
+                                : "Your place is confirmed.",
+                            )
                     }
                   >
                     {busy
@@ -995,7 +1032,7 @@ function Inbox({ notifications, select, refresh }) {
     </div>
   );
 }
-function Payments() {
+function Payments({ config }) {
   const [choice, setChoice] = useState("Cash");
   return (
     <div className="form-page">
@@ -1013,11 +1050,13 @@ function Payments() {
           your host pays your venue share.
         </p>
         <div className="offer">
-          <h3>Whish Money online checkout</h3>
+          <h3>Whish Pay demo checkout</h3>
           <p>
-            Whish is the planned online player-payment method. It is unavailable
-            until the merchant checkout API is connected and verified. Selecting
-            a method never marks an event as paid.
+            {config.mockPaymentsAvailable
+              ? "Try the clearly labeled mock Whish option in a priced event’s checkout. It simulates verification and transfers no real money."
+              : "Mock Whish checkout is unavailable in this environment."}
+            Real Whish remains unconnected; a demo is never a real payment
+            receipt.
           </p>
           <p>
             GameOn does not collect your Whish password, PIN, or one-time codes.
@@ -1415,7 +1454,7 @@ function App() {
                 refresh={refreshInbox}
               />
             )}{" "}
-            {page === "payments" && <Payments />}
+            {page === "payments" && <Payments config={config} />}
             {page === "auth" && (
               <Auth
                 config={config}

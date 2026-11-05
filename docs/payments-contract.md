@@ -20,3 +20,7 @@ Whish is visible but unavailable. Positive-price Whish joins are also rejected i
 ## Work required before real checkout
 
 Obtain the private merchant operation paths, authentication/signing rules, hosted checkout/status schemas, sandbox test cases, supported currencies and webhook verification contract. Derive amounts from the locked event and actual membership, never a client-controlled amount. Persist unique orders and provider references with idempotent reconciliation. A browser success redirect must not mark an order paid: verify status/signature on the server. Handle cancellation, timeout, duplicate callbacks and refunds in the sandbox before operational activation. Keep USD and LBP amounts separate and do not perform implicit conversion. Merchant credentials belong in User Secrets or production secure injection, never source or chat.
+
+## Commercial mock update
+
+See [COMMERCIAL.md](COMMERCIAL.md) and migration 13. Real Whish remains unavailable; a separate, development-only WhishMock choice now demonstrates signed verification and booking. No private merchant endpoints or authentication headers have been guessed.

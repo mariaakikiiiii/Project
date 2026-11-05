@@ -12,12 +12,14 @@ public static class PlatformEndpoints
     private static int Id(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
     public static void MapPlatform(this WebApplication app)
     {
-        app.MapGet("/api/config", (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish) => Results.Ok(new
+        app.MapGet("/api/config", (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish, GameOn.Payments.MockPaymentSecurity mock) => Results.Ok(new
         {
             mapsEmbedApiKey = config["Maps:EmbedApiKey"] ?? "",
             passwordResetAvailable = email.Enabled,
             onlinePaymentsAvailable = whish.IsAvailable,
             payoutAvailable = false,
+            mockPaymentsAvailable = mock.Enabled,
+            serviceFeeRate = GameOn.Payments.BookingFees.Rate,
             paymentMethods = new[] { new { code = "Cash", name = "Cash at the venue", available = true }, new { code = "Whish", name = "Whish Money", available = whish.IsAvailable } },
             currencies = new[] { "USD", "LBP" },
             country = "LB"

@@ -46,3 +46,14 @@ Not run: live 09 migration, distributed analytics seed, SQL invariant tests, act
 The user confirmed cash in person + Whish player payments, supplied sandbox/production roots and explicitly requested skipping/mocking execution. This release skips execution, stores no payment-provider secrets and creates no fake successful payments. Merchant operation paths/authentication and verification rules remain unimplemented until the private contract is available. No host cash-out workflow was requested in this clarified scope.
 
 The final GameOn.sln includes the API, database-check project, and virtual solution folders for SQL, React source and guides. The full solution build passed with `dotnet build --no-restore -m:1`, zero warnings/errors. Validation used single-worker mode; a parallel invocation in this sandbox returned a nonzero exit without compiler errors. SQL checks remain unexecuted against an engine.
+
+## Commercial layer (2026-11-05, Beirut)
+
+- Full solution build passed, single worker, zero warnings/errors.
+- GameOn.PaymentChecks executed 19 checks: decimal 2% fees, half-cent rounding, invalid amounts, valid/tampered/forged HMACs, stale/future timestamps, key separation, and mock rejection in Production regardless of its config flag. No database or money movement was involved.
+- All 16 SQL files passed SQL Server 2022 grammar validation, including the new migration, optional campaign seed and commercial invariant tests. This does not bind objects or execute transactions.
+- Playwright/Chromium browser suite passed sponsored badges, category flows, authoritative-looking fee rows with explicit API fixtures, cash checkout, mock initialization/demo confirmation, waitlist checkout, sponsorship, cancellation and mobile layout. The fixture APIs do not verify SQL, cryptography or real gateway processing.
+- Actual HTTPS smoke checks passed CSRF enforcement, anonymous checkout/payment rejection, unsigned mock webhook rejection, exact-path/POST-only CSRF exemption and public capability boundaries. TLS verification remained enabled.
+- Production frontend bundle built successfully at about 73 KB gzip JavaScript and 7 KB gzip CSS. These are artifact sizes, not throughput/latency measurements.
+
+Not executed: live migration 13, actual SQL cash/idempotency transitions, real concurrent mock confirmations, campaign query execution and signed-positive HTTP-to-database completion. database/15-commercial-tests.sql and the extended guarded database runner cover those when a disposable SQL Server is available. No real Whish endpoints were called. Cash is awaiting physical payment; MockSucceeded is explicitly a demo, never a real paid receipt. Mock operation is enabled only in Development/Testing and requires an explicit flag.

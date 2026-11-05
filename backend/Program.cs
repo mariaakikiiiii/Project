@@ -7,10 +7,14 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
 using static Database;
+using GameOn.Payments;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<MockPaymentSecurity>();
+builder.Services.AddSingleton<MockPaymentProcessor>();
 builder.Services.AddSingleton<GameOn.Payments.WhishMerchantConfiguration>();
 builder.Services.AddHttpClient("whish", (services, client) => { client.BaseAddress = services.GetRequiredService<GameOn.Payments.WhishMerchantConfiguration>().BaseAddress; client.Timeout = TimeSpan.FromSeconds(15); });
 builder.Services.AddSingleton<GameOn.Payments.IWhishGateway, GameOn.Payments.UnconfiguredWhishGateway>();
@@ -45,11 +49,15 @@ builder.Services.AddRateLimiter(o =>
     System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new()
         { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    o.AddPolicy("checkout", context => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new()
+        { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     o.AddPolicy("browse", context => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new()
         { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
+_ = app.Services.GetRequiredService<MockPaymentSecurity>();
 app.Use(async (ctx, next) =>
 {
     ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -86,7 +94,7 @@ app.Use(async (ctx, next) =>
 app.UseAuthentication(); app.UseAuthorization(); app.UseRateLimiter();
 app.Use(async (ctx, next) =>
 {
-    if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method) && !HttpMethods.IsOptions(ctx.Request.Method))
+    if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method) && !HttpMethods.IsOptions(ctx.Request.Method) && !(HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path == CommercialEndpoints.MockWebhookPath))
     {
         try { await ctx.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(ctx); }
         catch (AntiforgeryValidationException)
@@ -183,12 +191,16 @@ app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database d
 app.MapPost("/api/games/{id:int}/join", async (int id, JoinRequest? input, ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
     if (input?.PaymentMethod is not null and not "Cash" and not "Whish") return Results.BadRequest(new { error = "Unknown payment method." });
+    var quote = (await db.Call("dbo.GetPaymentQuote", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0];
+    if (Convert.ToDecimal(quote["amount"]) > 0 && !Convert.ToBoolean(quote["alreadyEnrolled"]))
+        return Results.BadRequest(new { error = "Review the fee breakdown using checkout before reserving this event." });
     return Results.Ok((await db.Call("dbo.sp_JoinGameOrActivity", ct, P("@GameId", SqlDbType.Int, id),
         P("@UserId", SqlDbType.Int, UserId(u)), P("@PaymentMethod", SqlDbType.VarChar, input?.PaymentMethod ?? "Cash", 12)))[0][0]);
 }).RequireAuthorization();
 app.MapDelete("/api/games/{id:int}/participation", async (int id, ClaimsPrincipal u, Database db, CancellationToken ct) =>
     Results.Ok((await db.Call("dbo.CancelParticipation", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0])).RequireAuthorization();
 app.MapPlatform();
+app.MapCommercial();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

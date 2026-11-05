@@ -15,3 +15,5 @@ Generated dependencies and build output are omitted; npm and NuGet restore them.
 PLATFORM UPGRADE: read docs/UPGRADE.md. Existing databases must apply 07-platform-upgrade.sql once in SQLCMD Mode. Do not rerun 01-schema.sql. Online cash-out needs your merchant-provider integration; Maps Embed and recovery email need secure configuration.
 
 GIN401 EDITION: after version 7, install 09-categories-and-events.sql once in SQLCMD Mode, then 10-user-analytics-seed.sql. Read docs/GIN401.md. All 17 sports/activities and the multi-step event form are included. Whish execution is skipped per request.
+
+COMMERCIAL LAYER: after version 9, install 13-commercial-layer.sql once in SQLCMD Mode. Read docs/COMMERCIAL.md. Optional seed 14 shows demo sponsored venues. Local Development supports clearly labeled mock Whish checkout; no real money moves.

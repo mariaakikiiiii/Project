@@ -61,3 +61,14 @@ assert call("/games?sportId=1&subtypeId=2")[0] == 400
 methods = {item["code"]: item["available"] for item in configuration["paymentMethods"]}
 assert methods == {"Cash": True, "Whish": False}
 print("PASS: category/subtype input validation and cash/Whish capability boundaries.")
+
+for path, method in [("/games/1/quote", "GET"), ("/games/1/checkout", "POST"),
+                     ("/payments/00000000-0000-4000-8000-000000000001", "GET"),
+                     ("/payments/00000000-0000-4000-8000-000000000001/mock-complete", "POST")]:
+    assert call(path, method, {} if method == "POST" else None)[0] == 401
+status, body = call("/payments/whish/mock/webhook", "POST", {})
+assert status == (401 if configuration["mockPaymentsAvailable"] else 404)
+assert call("/payments/whish/mock/webhook/extra", "POST", {})[0] == 400
+print("PASS: checkout authentication boundary, unsigned-webhook rejection and exact CSRF exemption.")
+
+assert call("/payments/whish/mock/webhook", "PUT", {})[0] == 400

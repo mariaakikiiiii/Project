@@ -274,8 +274,11 @@ export default function EventWizard({ lookups, existing, onSaved, onBack }) {
             <div className="form-wide payment-note">
               <strong>Clear prices. No surprises.</strong>
               <p>
-                Cash at the venue is available. Whish Money checkout needs
-                merchant activation before online payment can be offered.
+                A 2% platform service fee is added for new paid bookings and
+                shown to players at checkout. Free and host-covered places have
+                no player fee. Cash at the venue is available. Whish Money
+                checkout needs merchant activation before online payment can be
+                offered.
               </p>
             </div>
           </>

@@ -1,5 +1,7 @@
 # GameOn
 
+**Commercial layer:** [apply migration 13 and try 2% checkout, mock Whish and sponsored venues](docs/COMMERCIAL.md). Real Whish execution remains disabled; the local demo never transfers money.
+
 **GIN401 sports + activities edition:** read [the lab and schema guide](docs/GIN401.md). Existing databases apply version 7 if needed, then version 9; do not rerun the original schema. See [the Windows upgrade steps](docs/UPGRADE.md). Whish network execution is skipped as requested; cash-at-venue reservations work without merchant credentials.
 
 ![Redesigned GameOn discovery interface](docs/screenshots/discovery-preview.png)
@@ -18,10 +20,10 @@ A DBA creates an empty `GameOn` database using SQL Server or Azure SQL. Run thes
 4. Provision a dedicated `gameon_api` server login securely outside source control, then run [04-security.sql](database/04-security.sql). Use a distinct migration identity. Do not grant the API identity admin or direct table permissions.
 5. Install [07-platform-upgrade.sql](database/07-platform-upgrade.sql) in SQLCMD Mode as described in the upgrade guide.
 6. Install [09-categories-and-events.sql](database/09-categories-and-events.sql) in SQLCMD Mode, then run [10-user-analytics-seed.sql](database/10-user-analytics-seed.sql) for the additional 200,000-row analytics fixture.
-7. Run [05-tests.sql](database/05-tests.sql), then follow the two-session concurrency lab in [architecture.md](docs/architecture.md).
-8. Run [08-platform-tests.sql](database/08-platform-tests.sql) on a disposable upgraded database.
-9. Run [12-category-event-tests.sql](database/12-category-event-tests.sql), then [11-analytics-performance.sql](database/11-analytics-performance.sql).
-10. Run [06-performance.sql](database/06-performance.sql) with actual execution plans enabled for the large-table lab.
+7. Install [13-commercial-layer.sql](database/13-commercial-layer.sql). Optional [14-sponsored-demo-seed.sql](database/14-sponsored-demo-seed.sql) adds synthetic featured campaigns only.
+8. Run [05-tests.sql](database/05-tests.sql), [08-platform-tests.sql](database/08-platform-tests.sql), [12-category-event-tests.sql](database/12-category-event-tests.sql) and [15-commercial-tests.sql](database/15-commercial-tests.sql) on a disposable upgraded database.
+9. Run [11-analytics-performance.sql](database/11-analytics-performance.sql) and [06-performance.sql](database/06-performance.sql) with actual execution plans enabled.
+10. Follow [COMMERCIAL.md](docs/COMMERCIAL.md) for fee/security checks and [GIN401.md](docs/GIN401.md) for the true two-connection race runner. A fresh lab installer is also provided: database/install-fresh.sql (run sqlcmd from the repository root; it refuses to replace an existing database).
 
 SQL scripts use `GO`, which is handled by SSMS/sqlcmd, not by SqlCommand. They target a fresh database; schema/security migrations are deliberately not destructive rerunnable scripts. The data seed is rerunnable. No database is created automatically by the application.
 

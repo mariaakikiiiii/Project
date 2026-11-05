@@ -1,5 +1,7 @@
 # GameOn platform upgrade — existing Windows installation
 
+**Commercial update:** once version 9 is installed, apply `13-commercial-layer.sql` in SQLCMD Mode. Optional demo campaigns use `14-sponsored-demo-seed.sql`. Follow [COMMERCIAL.md](COMMERCIAL.md) for 2% fee policy and safe mock checkout.
+
 **Latest sports + activities edition:** after version 7, also install `09-categories-and-events.sql` in SQLCMD Mode. Then run `10-user-analytics-seed.sql` for the GIN401 analytics fixture. If version 7 is already installed, skip it. See [GIN401.md](GIN401.md) for the final schema, 17 event types and concurrency runner.
 
 This upgrade adds the redesigned responsive interface, profiles, saved sport/area preferences, personalized discovery, host editing/cancellation, host-covered venue places, an in-app notification inbox, map links/API embedding, and password recovery infrastructure. It preserves your users, games and audit rows.
