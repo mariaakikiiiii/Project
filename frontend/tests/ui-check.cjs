@@ -16,6 +16,7 @@ const fs = require("node:fs"),
   });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 1080 },
+    hasTouch: true,
   });
   const names = [
     "Basketball",
@@ -81,7 +82,7 @@ const fs = require("node:fs"),
     make(4, types[9], { venue: "Adventure Arena" }),
     make(5, types[14], { capacity: 2, playerCount: 2 }),
   ];
-  let mapsEnabled = false, lastCreatedLocation = null;
+  let mapsEnabled = false, lastCreatedLocation = null, anonymousPrivateRequests = 0;
   let viewer = 0,
     profileSaved = false,
     created = false,
@@ -103,6 +104,7 @@ const fs = require("node:fs"),
       url = new URL(req.url()),
       p = url.pathname,
       m = req.method();
+    if (!viewer && p.startsWith("/api/me/")) anonymousPrivateRequests++;
     let status = 200,
       data = {};
     if (p === "/api/lookups")
@@ -369,7 +371,7 @@ const fs = require("node:fs"),
       .waitFor();
   }
   async function discover() {
-    await page.getByRole("button", { name: "Discover", exact: true }).click();
+    await page.getByRole("link", { name: "Discover", exact: true }).click();
     await page.locator(".game-card").first().waitFor();
   }
   async function open(sport, venue) {
@@ -397,33 +399,71 @@ const fs = require("node:fs"),
   });
   await page.goto(process.env.GAMEON_UI_URL || "http://127.0.0.1:5173");
   await page
-    .getByRole("heading", { name: "Less scrolling. More playing." })
+    .getByRole("heading", { name: "Find your next game." })
     .waitFor();
   await page.locator(".game-card").nth(4).waitFor();
   await page
-    .getByRole("heading", { name: "Local spots. In the spotlight." })
+    .getByRole("heading", { name: "Featured venues" })
     .waitFor();
+  const nav=page.getByRole("navigation",{name:"Main navigation"});
+  await nav.getByRole("link",{name:"My games",exact:true}).click();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  assert.match(page.url(), /#\/my-games$/);
+  await page.getByRole("link",{name:"Skip to content",exact:true}).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(()=>document.activeElement.id),"main");
+  assert.match(page.url(), /#\/my-games$/);
+
+  assert.equal(await nav.getByRole("link",{name:"My games",exact:true}).getAttribute("aria-current"),"page");
+  await nav.getByRole("link",{name:"Inbox",exact:true}).focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
+  assert.match(page.url(), /#\/inbox$/);
+  await page.goBack();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  assert.equal(anonymousPrivateRequests,0,"signed-out tabs do not request private data");
+  await page.screenshot({path:path.join(os.tmpdir(),"GameOn-account-gate.png"),animations:"disabled"});
+  await page.getByRole("button",{name:"Sign in to continue",exact:true}).click();
+  await page.getByText("Sign in to continue to My games.",{exact:true}).waitFor();
+  await page.getByLabel("Email",{exact:true}).fill("maria@example.invalid");
+  await page.getByLabel("Password",{exact:true}).fill("ui-only-fake-password");
+  await page.getByRole("button",{name:"Let’s play ↗",exact:true}).click();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  assert.equal(await page.locator(".account-gate").count(),0);
+  await page.getByRole("button",{name:"View Basketball at Central Court",exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  await nav.getByRole("link",{name:/Inbox/}).click();
+  await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
+  await page.goBack();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  await page.getByRole("button",{name:/Sign out/}).click();
+  await page.getByRole("heading",{name:"Find your next game.",exact:true}).waitFor();
+  await page.locator(".sponsored-label").nth(1).waitFor();
   assert.equal(await page.locator(".sponsored-label").count(), 2);
-  assert.equal(await page.locator(".type-chips button").count(), 18);
+  assert.equal(await page.getByLabel("Sport or activity", {exact:true}).locator("option").count(), 18);
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   await page.getByRole("button", { name: "Switch to light mode" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
   await page.reload();
   await page.locator(".game-card").nth(4).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
-  await page.screenshot({ path: path.join(os.tmpdir(), "GameOn-light.png"), fullPage: true });
+  await page.screenshot({ path: path.join(os.tmpdir(), "GameOn-light.png"), fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
-  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--page").trim()), "#0f172a");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--page").trim()), "#111a16");
   await page.screenshot({
     path: path.join(os.tmpdir(), "GameOn-desktop.png"),
     fullPage: true,
+    animations: "disabled",
   });
   await page.getByRole("button", { name: "Activities", exact: true }).click();
   await page
     .getByRole("button", { name: "View Paintball at Adventure Arena" })
     .waitFor();
   assert.equal(await page.locator(".game-card").count(), 2);
-  assert.equal(await page.locator(".type-chips button").count(), 9);
+  assert.equal(await page.getByLabel("Sport or activity", {exact:true}).locator("option").count(), 9);
   await page.getByRole("button", { name: "Sports", exact: true }).click();
   await page
     .getByRole("button", { name: "View Basketball at Central Court" })
@@ -440,7 +480,7 @@ const fs = require("node:fs"),
   await page.getByRole("button", { name: "Find events ↗" }).click();
   await page.locator(".game-card").nth(4).waitFor();
   await login("maria@example.invalid", "Maria");
-  await page.getByRole("button", { name: "My profile", exact: true }).click();
+  await page.getByRole("link", { name: "My profile", exact: true }).click();
   await page.getByLabel("Padel", { exact: true }).check();
   await page.getByRole("button", { name: "Save my preferences ↗" }).click();
   await page.getByRole("heading", { name: "Your next game, Maria." }).waitFor();
@@ -548,7 +588,7 @@ const fs = require("node:fs"),
   await page.getByRole("button", { name: "I transferred — submit reference" }).click();
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
   await page.getByRole("button", { name: "Close checkout" }).click();
-  await page.getByRole("button", { name: "Payments", exact:true }).click();
+  await page.getByRole("link", { name: "Payments", exact: true }).click();
   await page.getByText(/Paintball at Adventure Arena · USD 15.75 · Awaiting verification/).waitFor();
   await page.locator(".payment-record summary").click();
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
@@ -577,11 +617,11 @@ const fs = require("node:fs"),
   await page.getByText("Reference submitted. Awaiting operator verification. Do not transfer again.",{exact:true}).waitFor();
   assert.equal(depositBooking.depositStatus,"PENDING");
   await page.getByRole("button",{name:"Close deposit checkout"}).click();
-  await page.getByRole("button",{name:"Payments",exact:true}).click();
+  await page.getByRole("link",{name:"Payments",exact:true}).click();
   await page.getByText("Padel at Central Court · Deposit pending",{exact:true}).waitFor();
   await page.getByRole("button", { name: /Sign out/ }).click();
   await login("maria@example.invalid", "Maria");
-  await page.getByRole("button", { name: /Inbox/ }).click();
+  await page.getByRole("link", { name: /Inbox/ }).click();
   await page.getByText("A place opened. You are in!", { exact: true }).click();
   await page
     .getByRole("heading", { name: "Basketball at Central Court" })
@@ -612,15 +652,32 @@ const fs = require("node:fs"),
   assert(activityCreated);
   await discover();
   await page.setViewportSize({ width: 390, height: 844 });
+  if (await page.getByRole("button",{name:"Dismiss notification",exact:true}).count()) await page.getByRole("button",{name:"Dismiss notification",exact:true}).click();
+  await page.screenshot({path:path.join(os.tmpdir(),"GameOn-mobile-viewport.png"),animations:"disabled"});
   await page.screenshot({
     path: path.join(os.tmpdir(), "GameOn-mobile.png"),
     fullPage: true,
+    animations: "disabled",
   });
   assert(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   );
+  await page.getByRole("button",{name:/^Filters/}).tap();
+  await page.getByLabel("Neighborhood",{exact:true}).waitFor({state:"visible"});
+  await page.getByRole("button",{name:/^Filters/}).tap();
+  await page.getByLabel("Neighborhood",{exact:true}).waitFor({state:"hidden"});
+  await nav.getByRole("link",{name:"My games",exact:true}).tap();
+  await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
+  await nav.getByRole("link",{name:/Inbox/}).tap();
+  await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
+  const bar=await nav.boundingBox();
+  assert(bar.y>600 && bar.y+bar.height<=845,"mobile tabs are fixed to the viewport bottom and tappable");
+  await discover();
+  await page.setViewportSize({width:820,height:1000});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),"tablet layout stays within viewport");
+  await page.setViewportSize({width:390,height:844});
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await page.locator(".live-dot").evaluate(el => getComputedStyle(el).animationName), "none");
   await page.getByRole("button", { name: "Switch to light mode" }).click();
@@ -629,7 +686,7 @@ const fs = require("node:fs"),
   await page.setViewportSize({width:1440,height:1080});
   await page.reload();
   await page.locator(".game-card").first().waitFor();
-  await page.locator(".type-chips button").filter({hasText:"Basketball"}).click();
+  await page.getByLabel("Sport or activity",{exact:true}).selectOption("1");
   await page.locator(".venue-discovery summary").click();
   await page.locator(".venue-discovery").getByRole("button",{name:"Search venues",exact:true}).click();
   await page.getByText("Lebanese Court Fixture",{exact:true}).waitFor();
@@ -653,7 +710,7 @@ const fs = require("node:fs"),
   assert.deepEqual(errors, []);
   await browser.close();
   console.log(
-    "PASS: 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, 5% cash fee breakdown, $1 deposit/5% quote and cash-balance option, venue tel link, deposit roster badge and pending reference/history, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
+    "PASS: signed-out/in My games and Inbox navigation, post-login destination, keyboard/mobile taps, Back/reload, 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, 5% cash fee breakdown, $1 deposit/5% quote and cash-balance option, venue tel link, deposit roster badge and pending reference/history, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
   );
 })().catch((error) => {
   console.error(error);

@@ -107,7 +107,7 @@ h3 {
   display: flex;
   gap: 6px;
 }
-.site-header nav button {
+.site-header nav :is(button, a) {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -117,7 +117,7 @@ h3 {
   padding: 12px;
   border-radius: 30px;
 }
-.site-header nav button.active {
+.site-header nav :is(button, a).active {
   background: #edf3e9;
   color: var(--green);
   font-weight: 700;
@@ -1152,7 +1152,7 @@ footer > span {
     gap: 15px;
     padding: 18px 24px;
   }
-  .site-header nav button {
+  .site-header nav :is(button, a) {
     padding: 10px 8px;
     font-size: 12px;
   }
@@ -1215,7 +1215,7 @@ footer > span {
     border-top: 1px solid var(--line);
     padding-top: 10px;
   }
-  .site-header nav button {
+  .site-header nav :is(button, a) {
     font-size: 11px;
     padding: 9px 12px;
   }
@@ -1448,7 +1448,7 @@ footer > span {
   .header-actions {
     gap: 8px;
   }
-  .site-header nav button {
+  .site-header nav :is(button, a) {
     padding: 8px;
   }
   .site-header nav {

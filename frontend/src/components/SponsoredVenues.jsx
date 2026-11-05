@@ -33,7 +33,7 @@ export default function SponsoredVenues({ onExplore }) {
       <div className="section-heading">
         <div>
           <span className="overline">SPONSORED VENUES</span>
-          <h2>Local spots. In the spotlight.</h2>
+          <h2>Featured venues</h2>
         </div>
         <div className="carousel-controls">
           <button
@@ -61,18 +61,17 @@ export default function SponsoredVenues({ onExplore }) {
               </div>
               <h3>{v.name}</h3>
               <p>
-                {v.area} · {v.address}
+                {v.area}
               </p>
-              <button className="text-link" onClick={() => onExplore(v.area)}>
-                Explore {v.area} →
+              <button className="text-link" aria-label={`View games in ${v.area}`} onClick={() => onExplore(v.area)}>
+                View games
               </button>
             </div>
           </li>
         ))}
       </ul>
       <p className="sponsor-disclosure">
-        Paid placements, clearly labeled. Event results below still follow your
-        filters and preferences.
+        Sponsored placements · Your game results follow your filters.
       </p>
     </section>
   );

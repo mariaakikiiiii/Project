@@ -82,3 +82,8 @@ Not executed: live migration 13, actual SQL cash/idempotency transitions, real c
 ## Incomplete 13/16 migration repair
 
 A user reported version 16 recorded with missing venue columns, missing manual-transfer tables and no Payments columns visible. Added a guarded, data-preserving repair for incomplete 13/16 schemas. Rebuilt current 16/18 migrations as ordinary-SSMS single-transaction wrappers with constant DDL/module compilation scopes, avoiding same-batch new-column binding and SQLCMD continuation hazards. The syntax checker now also parses decoded constant dynamic SQL, rather than only its string wrapper. Repair refuses recorded/partial deposit schemas. SQL Server is still unavailable here: grammar validation is not an engine execution or rollback proof.
+
+
+## Navigation and discovery redesign
+
+Frontend production build and Chromium fixture suite passed for distinct My games/Inbox destinations signed out and signed in, no anonymous private resource calls, post-login My games return, keyboard activation, active route indicators, Back/reload, touch navigation at 390px and overflow at 390px/820px. Existing booking/deposit/Whish/map fixture flows remained covered. The Sportciety reference URL could not be inspected because the workspace proxy denied that destination; no exact visual reproduction is claimed. No database migration or backend permission change was made for this frontend update.

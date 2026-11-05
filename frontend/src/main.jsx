@@ -9,6 +9,7 @@ import {
   playable,
   mapQuery,
 } from "./domain";
+import {protectedPages, pageLabels, routeHref, readRoute} from "./navigation";
 import "./style.css";
 import "./theme.css";
 import DepositCheckout from "./components/DepositCheckout";
@@ -23,7 +24,9 @@ import GameForm from "./components/EventWizard";
 
 function Mark({ name }) {
   const paths = {
-    pin: "M7 17 17 7M7 7h10v10",
+    arrow: "M7 17 17 7M7 7h10v10",
+    pin: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
+    payments: "M3 7h18v14H3zM3 7V4h15v3M16 12h5v5h-5z",
     back: "M19 12H5m6-6-6 6 6 6",
     check: "m5 12 4 4L19 6",
     discover: "m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
@@ -189,6 +192,7 @@ function GameCard({ game: g, select, user }) {
             <span className="host-label">You host</span>
           )}
           {g.isSponsored && <span className="pill">Fee covered</span>}
+          <button className="card-view" onClick={()=>select(g.gameId)} aria-label={`Open ${g.sport} at ${g.venue}`}>View game <Mark name="arrow"/></button>
         </div>
       </div>
     </article>
@@ -196,6 +200,7 @@ function GameCard({ game: g, select, user }) {
 }
 function Feed({ lookups, user, select, navigate, revision, config }) {
   const [venueFinderOpen, setVenueFinderOpen] = useState(false);
+  const [moreFilters, setMoreFilters] = useState(false);
   const [filters, setFilters] = useState({
     sportId: "",
     category: "",
@@ -249,81 +254,19 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
   }
   return (
     <>
-      <SponsoredVenues onExplore={exploreSponsored} />
-      <section className="hero">
+      <section className="hero discovery-intro">
         <div className="hero-copy">
-          <span className="overline">
-            <span className="live-dot" /> GOOD GAMES START WITH GOOD PEOPLE
-          </span>
-          <h1>
-            {user ? (
-              <>
-                Your next game,
-                <br />
-                <em>{user.name.split(" ")[0]}.</em>
-              </>
-            ) : (
-              <>
-                Less scrolling.
-                <br />
-                <em>More playing.</em>
-              </>
-            )}
-          </h1>
-          <p>
-            From pickup matches to escape-room missions. Find your people. Make
-            a better plan.
-          </p>
-          <div className="hero-actions">
-            <button
-              className="primary"
-              onClick={() =>
-                document
-                  .getElementById("discover-filters")
-                  .scrollIntoView({ behavior: "smooth" })
-              }
-            >
-              Find my next game <Mark name="pin" />
-            </button>
-            <button className="hero-secondary" onClick={() => navigate("host")}>
-              Bring your own crew +
-            </button>
-          </div>
-          <div className="hero-note">
-            <span className="mini-avatars">
-              <i>M</i>
-              <i>J</i>
-              <i>R</i>
-            </span>
-            <span>Casual games. Real connections. Across Lebanon.</span>
-          </div>
+          <span className="overline"><span className="live-dot" /> SPORTS & ACTIVITIES · LEBANON</span>
+          <h1>{user ? <>Your next game, <em>{user.name.split(" ")[0]}.</em></> : <>Find your <em>next game.</em></>}</h1>
+          <p>Pick a sport. Find a place. Meet your crew.</p>
         </div>
-        <div className="hero-visual">
-          <div className="orbit one" />
-          <div className="orbit two" />
-          <div className="hero-ball">
-            <svg viewBox="0 0 200 200" aria-hidden="true">
-              <circle cx="100" cy="100" r="98" />
-              <path d="M2 100h196M100 2v196M28 30c80 5 80 135 0 140M172 30c-80 5-80 135 0 140" />
-            </svg>
-          </div>
-          <div className="floating-card">
-            <span>THE ONE-MORE CLUB</span>
-            <strong>One player short?</strong>
-            <p>
-              Offer a host-covered place.
-              <br />
-              Their game. Your treat.
-            </p>
-            <span className="tiny-pill">More play. Less friction.</span>
-          </div>
-          <span className="visual-label">BEIRUT & BEYOND ↗</span>
-        </div>
+        <div className="intro-location"><Mark name="pin"/><span>Made for Lebanon<small>Courts, crews & new connections</small></span></div>
       </section>
+      <SponsoredVenues onExplore={exploreSponsored} />
       <div className="section-heading">
         <div>
-          <span className="overline">FIND YOUR KIND OF GAME</span>
-          <h2>{user ? "Picked with you in mind" : "A game for every mood"}</h2>
+          <span className="overline">GET OUT. GET IN THE GAME.</span>
+          <h2>Explore games & activities</h2>
         </div>
         {user ? (
           <button className="text-link" onClick={() => navigate("profile")}>
@@ -336,43 +279,20 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
         )}
       </div>
       <CategoryTabs value={filters.category} onChange={category} />
-      <details className="venue-discovery" onToggle={e => setVenueFinderOpen(e.currentTarget.open)}><summary>Find courts & activity venues in Lebanon ↗</summary>{venueFinderOpen && <VenueMap config={config} type={lookups.sports.find(s => s.sportId === Number(filters.sportId))?.name}/>}</details>
-      <label className="mobile-type-select">
-        Sport or activity
-        <select value={filters.sportId} onChange={(e) => sport(e.target.value)}>
-          <option value="">All types</option>
-          {visibleTypes.map((t) => (
-            <option key={t.sportId} value={t.sportId}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div
-        className="sport-chips type-chips"
-        aria-label="Filter by sport or activity"
-      >
-        <button
-          className={!filters.sportId ? "selected" : ""}
-          onClick={() => sport("")}
-        >
-          All types
-        </button>
-        {visibleTypes.map((s) => (
-          <button
-            key={s.sportId}
-            className={String(s.sportId) === filters.sportId ? "selected" : ""}
-            onClick={() => sport(s.sportId)}
-          >
-            {s.name === "Basketball" ? "◉" : s.name === "Football" ? "⬡" : "◍"}{" "}
-            {s.name}
-          </button>
-        ))}
-      </div>
       <form id="discover-filters" className="filter-bar" onSubmit={search}>
+        <label>
+          Sport or activity
+          <select aria-label="Sport or activity" value={filters.sportId} onChange={e=>sport(e.target.value)}>
+            <option value="">All types</option>
+            {visibleTypes.map(t=><option key={t.sportId} value={t.sportId}>{t.name}</option>)}
+          </select>
+        </label>
+        <button type="button" className="secondary filter-toggle" aria-expanded={moreFilters} aria-controls="extra-discovery-filters" onClick={()=>setMoreFilters(v=>!v)}>Filters{[filters.area,filters.date,filters.freeOnly,filters.openOnly].filter(Boolean).length ? ` (${[filters.area,filters.date,filters.freeOnly,filters.openOnly].filter(Boolean).length})` : ""}</button>
+        <div id="extra-discovery-filters" className="filter-extra" data-expanded={moreFilters}>
         <label>
           Neighborhood
           <select
+            aria-label="Neighborhood"
             value={filters.area}
             onChange={(e) => setFilters({ ...filters, area: e.target.value })}
           >
@@ -410,8 +330,10 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
           />{" "}
           Open spots only
         </label>
+        </div>
         <button className="primary">Find events ↗</button>
       </form>
+      <details className="venue-discovery" onToggle={e => setVenueFinderOpen(e.currentTarget.open)}><summary>Find courts & activity venues in Lebanon ↗</summary>{venueFinderOpen && <VenueMap config={config} type={lookups.sports.find(s => s.sportId === Number(filters.sportId))?.name}/>}</details>
       <Alert>{error}</Alert>
       {loading ? (
         <Loading />
@@ -843,7 +765,7 @@ function MyGames({ user, select }) {
   return (
     <>
       <span className="overline">YOUR PEOPLE. YOUR PLANS.</span>
-      <h1>Your game plan.</h1>
+      <h1>My games</h1>
       <p className="lead">
         Confirmed places, waiting lists, and the games you bring to life.
       </p>
@@ -1011,7 +933,7 @@ function Inbox({ notifications, select, refresh }) {
   return (
     <div className="inbox">
       <span className="overline">NEVER MISS YOUR MOMENT</span>
-      <h1>The latest from your crew.</h1>
+      <h1>Inbox</h1>
       <p className="lead">
         Game changes, new players, and the moment your waitlist place opens.
       </p>
@@ -1084,7 +1006,7 @@ function Payments({ config, user }) {
     </div>
   );
 }
-function Auth({ config, onLogin }) {
+function Auth({ config, onLogin, destination }) {
   const reset = useRef(new URLSearchParams(location.search).get("reset"));
   const [mode, setMode] = useState(reset.current ? "reset" : "login"),
     [busy, setBusy] = useState(false),
@@ -1157,6 +1079,7 @@ function Auth({ config, onLogin }) {
         <Court sport="Basketball" large />
       </div>
       <div className="panel auth-panel">
+        {destination && <p className="auth-context" role="status">Sign in to continue to {pageLabels[destination] || "your account"}.</p>}
         <span className="overline">WELCOME TO THE CREW</span>
         <h2>
           {mode === "register"
@@ -1260,20 +1183,24 @@ function Auth({ config, onLogin }) {
     </div>
   );
 }
+function AccountGate({page, onSignIn, onDiscover}) {
+  const descriptions = {mine:"Your bookings, hosted games and waitlist places will appear here.",inbox:"Get game updates, player notifications and waitlist alerts here.",profile:"Save your favorite sports, preferred area and player profile.",host:"Choose a sport, venue and time, then invite your next crew."};
+  return <section className="account-gate" aria-labelledby="account-heading"><span className="gate-icon"><Mark name={page === "mine" ? "games" : page}/></span><span className="overline">YOUR GAMEON ACCOUNT</span><h1 id="account-heading">{pageLabels[page]}</h1><p>{descriptions[page]}</p><p className="muted">Sign in to access this page.</p><div className="gate-actions"><button className="primary" onClick={onSignIn}>Sign in to continue</button><button className="secondary" onClick={onDiscover}>Browse games</button></div></section>;
+}
 function App() {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "dark");
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
-    document.documentElement.style.backgroundColor = next === "light" ? "#f3f6fb" : "#0f172a";
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#f3f6fb" : "#0f172a");
+    document.documentElement.style.backgroundColor = next === "light" ? "#f5f6f0" : "#111a16";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#f5f6f0" : "#111a16");
     setTheme(next);
     try { localStorage.setItem("gameon-theme", next); } catch { /* Storage is optional. */ }
   }
   const [page, setPage] = useState(
-      new URLSearchParams(location.search).has("reset") ? "auth" : "discover",
+      new URLSearchParams(location.search).has("reset") ? "auth" : readRoute().page,
     ),
-    [selected, setSelected] = useState(null),
+    [selected, setSelected] = useState(() => readRoute().selected),
     [user, setUser] = useState(null),
     [authReady, setAuthReady] = useState(false);
   const [lookups, setLookups] = useState({ sports: [], venues: [] }),
@@ -1282,6 +1209,9 @@ function App() {
     [toast, setToast] = useState(""),
     [revision, setRevision] = useState(0),
     [notifications, setNotifications] = useState(null);
+  const [returnAfterAuth, setReturnAfterAuth] = useState(null);
+  const currentRoute = useRef({page, selected});
+  currentRoute.current = {page, selected};
   const toastTimer = useRef();
   function notify(text) {
     clearTimeout(toastTimer.current);
@@ -1332,7 +1262,9 @@ function App() {
       } catch (e) {
         if (!stopped && e.status === 401) {
           setUser(null);
+          setReturnAfterAuth(currentRoute.current);
           setPage("auth");
+          history.replaceState(null, "", routeHref("auth"));
           await refreshCsrf().catch(() => {});
           notify("Your session ended. Please sign in again.");
         }
@@ -1348,22 +1280,29 @@ function App() {
       document.removeEventListener("visibilitychange", poll);
     };
   }, [user?.userId]);
-  function navigate(next) {
-    if (["host", "mine", "profile", "inbox"].includes(next) && !user)
-      next = "auth";
+  useEffect(() => {
+    function restoreRoute() {const next=readRoute();setPage(next.page);setSelected(next.selected);window.scrollTo({top:0,behavior:"auto"});}
+    window.addEventListener("popstate",restoreRoute);
+    window.addEventListener("hashchange",restoreRoute);
+    return () => {window.removeEventListener("popstate",restoreRoute);window.removeEventListener("hashchange",restoreRoute);};
+  }, []);
+  useEffect(() => {document.title = `${page === "details" ? "Event details" : pageLabels[page] || "Sign in"} · GameOn`;}, [page]);
+  function navigate(next, eventId = selected, replace = false) {
+    if (next === "auth" && page !== "auth") setReturnAfterAuth({page: protectedPages.has(page) || page === "details" ? page : "discover",selected});
     setPage(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (next === "details") setSelected(eventId);
+    const href=routeHref(next,eventId);
+    if (location.hash !== href) history[replace ? "replaceState" : "pushState"](null,"",href);
+    window.scrollTo({top:0,behavior:matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
   }
-  function select(id) {
-    setSelected(id);
-    navigate("details");
-  }
+  function select(id) {navigate("details",id);}
   async function logout() {
     try {
       await api("/auth/logout", "POST");
       await refreshCsrf();
       setUser(null);
-      navigate("discover");
+      setReturnAfterAuth(null);
+      navigate("discover",null,true);
       notify("Signed out. See you next game.");
     } catch (e) {
       notify(e.message);
@@ -1378,7 +1317,7 @@ function App() {
   ];
   return (
     <>
-      <a className="skip" href="#main">
+      <a className="skip" href="#main" onClick={e => {e.preventDefault();document.getElementById("main")?.focus();}}>
         Skip to content
       </a>
       <header className="site-header">
@@ -1391,10 +1330,12 @@ function App() {
         </button>
         <nav aria-label="Main navigation">
           {links.map(([key, label]) => (
-            <button
+            <a
               key={key}
+              href={routeHref(key)}
+              aria-current={page === key ? "page" : undefined}
               className={page === key ? "active" : ""}
-              onClick={() => navigate(key)}
+              onClick={e => {if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {e.preventDefault();navigate(key);}}}
             >
               <Mark name={key === "mine" ? "games" : key} />
               {label}
@@ -1406,7 +1347,7 @@ function App() {
                   {Math.min(notifications.unreadCount, 99)}
                 </span>
               )}
-            </button>
+            </a>
           ))}
         </nav>
         <div className="header-actions">
@@ -1429,7 +1370,7 @@ function App() {
             ))}
         </div>
       </header>
-      <main id="main">
+      <main id="main" tabIndex={-1}>
         <Alert>{error}</Alert>
         {!authReady ? (
           <Loading />
@@ -1457,6 +1398,7 @@ function App() {
                 notify={notify}
               />
             )}
+            {protectedPages.has(page) && !user && <AccountGate page={page} onSignIn={() => navigate("auth")} onDiscover={() => navigate("discover")}/>}
             {page === "host" && user && (
               <GameForm
                 lookups={lookups}
@@ -1491,10 +1433,13 @@ function App() {
             {page === "auth" && (
               <Auth
                 config={config}
+                destination={protectedPages.has(returnAfterAuth?.page) || returnAfterAuth?.page === "details" ? returnAfterAuth.page : undefined}
                 onLogin={(me) => {
                   setUser(me);
                   setRevision((v) => v + 1);
-                  navigate("discover");
+                  const destination=returnAfterAuth || {page:"discover",selected:null};
+                  navigate(destination.page,destination.selected,true);
+                  setReturnAfterAuth(null);
                   notify(`Welcome back, ${me.name.split(" ")[0]}.`);
                 }}
               />
