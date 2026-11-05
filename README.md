@@ -1,6 +1,6 @@
 # Latest update
 
-**Frontend update:** [navigation fix and simpler sports community interface](docs/UI-UPDATE.md). My games/Inbox now show distinct pages, preserve sign-in destinations and support Back/reload. No additional database migration is needed for this UI update.
+**Current update — database + backend + frontend:** [signup, in-app venue search and the screenshot-inspired design](docs/ONBOARDING-VENUES.md). Apply **migration 20 after migration 18** before starting the new API. Guest menus hide private pages; signup requires gender, DOB and 1–3 sports.
 
 **Migration errors near `:` or missing latitude/payment columns despite version 16 being recorded?** Follow [the guarded repair guide](docs/REPAIR-16.md). Do not delete version rows or rerun the older scripts.
 

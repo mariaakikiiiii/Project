@@ -21,5 +21,6 @@ GO
 :r database/13-commercial-layer.sql
 :r database/16-location-manual-whish.sql
 :r database/18-security-deposits.sql
-PRINT 'GameOn lab database installed. Run 19-security-deposit-tests.sql and the guarded database checks on a disposable copy. Earlier SQL tests target their corresponding migration versions.';
+:r database/20-onboarding-venues.sql
+PRINT 'GameOn lab database installed. Run 19-security-deposit-tests.sql, 21-onboarding-venue-tests.sql and the guarded database checks on a disposable copy. Earlier SQL tests target their corresponding migration versions.';
 GO

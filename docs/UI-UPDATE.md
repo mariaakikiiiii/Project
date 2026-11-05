@@ -1,3 +1,5 @@
+> Historical frontend-only release. For the current signup/venue update, follow [ONBOARDING-VENUES.md](ONBOARDING-VENUES.md): migration 20 and updated backend are required.
+
 # Navigation and sports community design update
 
 This update changes the React frontend only. If migrations 13/16 were repaired and migration 18 completed successfully, **do not run another database migration for this update**.

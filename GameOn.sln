@@ -32,6 +32,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{3E
 		database\17-location-payment-tests.sql = database\17-location-payment-tests.sql
 		database\18-security-deposits.sql = database\18-security-deposits.sql
 		database\19-security-deposit-tests.sql = database\19-security-deposit-tests.sql
+		database\20-onboarding-venues.sql = database\20-onboarding-venues.sql
+		database\21-onboarding-venue-tests.sql = database\21-onboarding-venue-tests.sql
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Frontend", "{A84E09AF-B36B-5094-B1F1-2EC930A27B35}"
@@ -50,6 +52,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Fro
 		frontend\src\theme.css = frontend\src\theme.css
 		frontend\public\theme-init.js = frontend\public\theme-init.js
 		frontend\src\components\VenueMap.jsx = frontend\src\components\VenueMap.jsx
+		frontend\src\components\SportsPicker.jsx = frontend\src\components\SportsPicker.jsx
+		frontend\src\components\VenueDirectory.jsx = frontend\src\components\VenueDirectory.jsx
 		frontend\src\components\ManualWhish.jsx = frontend\src\components\ManualWhish.jsx
 		frontend\src\components\PaymentHistory.jsx = frontend\src\components\PaymentHistory.jsx
 		frontend\src\components\DepositCheckout.jsx = frontend\src\components\DepositCheckout.jsx
@@ -70,6 +74,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Guides", "Guides", "{DB2CD8
 		docs\UPDATE-16.md = docs\UPDATE-16.md
 		docs\DEPOSITS.md = docs\DEPOSITS.md
 		docs\UI-UPDATE.md = docs\UI-UPDATE.md
+		docs\ONBOARDING-VENUES.md = docs\ONBOARDING-VENUES.md
 		docs\REPAIR-16.md = docs\REPAIR-16.md
 	EndProjectSection
 EndProject

@@ -4,4 +4,4 @@ try {
 } catch {
   document.documentElement.dataset.theme = "dark";
 }
-document.documentElement.style.backgroundColor = document.documentElement.dataset.theme === "light" ? "#f5f6f0" : "#111a16";
+document.documentElement.style.backgroundColor = document.documentElement.dataset.theme === "light" ? "#f6f6f8" : "#000000";

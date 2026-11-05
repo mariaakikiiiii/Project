@@ -21,6 +21,8 @@ import VenueMap from "./components/VenueMap";
 import PaymentHistory from "./components/PaymentHistory";
 import CategoryTabs from "./components/CategoryTabs";
 import GameForm from "./components/EventWizard";
+import SportsPicker,{genderOptions,todayInput} from "./components/SportsPicker";
+import VenueDirectory from "./components/VenueDirectory";
 
 function Mark({ name }) {
   const paths = {
@@ -29,11 +31,12 @@ function Mark({ name }) {
     payments: "M3 7h18v14H3zM3 7V4h15v3M16 12h5v5h-5z",
     back: "M19 12H5m6-6-6 6 6 6",
     check: "m5 12 4 4L19 6",
-    discover: "m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+    discover: "m3 11 9-8 9 8v10h-6v-6H9v6H3Z",
     games: "M3 5h18v16H3zM7 2v6m10-6v6M3 11h18",
     inbox: "M18 8a6 6 0 0 0-12 0c0 8-3 8-3 10h18c0-2-3-2-3-10M10 21h4",
     profile: "M20 21a8 8 0 0 0-16 0M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
     host: "M12 5v14M5 12h14",
+    venues: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   };
   return (
     <svg
@@ -113,7 +116,7 @@ function Court({ sport, large = false }) {
 function GameCard({ game: g, select, user }) {
   const covered = availableCovered(g);
   return (
-    <article className="game-card">
+    <article className={`game-card ${g.gameStatus === "Cancelled" ? "is-cancelled" : g.playerCount>=g.capacity ? "is-full" : ""}`}>
       <button
         className="card-art"
         aria-label={`View ${g.sport} at ${g.venue}`}
@@ -192,9 +195,10 @@ function GameCard({ game: g, select, user }) {
             <span className="host-label">You host</span>
           )}
           {g.isSponsored && <span className="pill">Fee covered</span>}
-          <button className="card-view" onClick={()=>select(g.gameId)} aria-label={`Open ${g.sport} at ${g.venue}`}>View game <Mark name="arrow"/></button>
+
         </div>
       </div>
+          <button className="card-view" onClick={()=>select(g.gameId)} aria-label={`Open ${g.sport} at ${g.venue}`}>View game & join <Mark name="arrow"/></button>
     </article>
   );
 }
@@ -260,13 +264,19 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
           <h1>{user ? <>Your next game, <em>{user.name.split(" ")[0]}.</em></> : <>Find your <em>next game.</em></>}</h1>
           <p>Pick a sport. Find a place. Meet your crew.</p>
         </div>
-        <div className="intro-location"><Mark name="pin"/><span>Made for Lebanon<small>Courts, crews & new connections</small></span></div>
+        <div className="hero-sports-art" aria-hidden="true"><svg viewBox="0 0 260 220"><defs><linearGradient id="racket-accent" x2="1" y2="1"><stop stopColor="#ff3818"/><stop offset="1" stopColor="#ffc85c"/></linearGradient></defs><g transform="rotate(25 130 110)"><ellipse cx="130" cy="75" rx="53" ry="67" fill="#1a2628" stroke="url(#racket-accent)" strokeWidth="9"/><path d="M100 25v100m20-112v124m20-124v124m20-112v100M80 50h100M78 75h104M82 100h96" stroke="#d5e2d1" strokeWidth="2" opacity=".65"/><path d="m113 139 8 31h18l8-31M130 170v45" fill="none" stroke="url(#racket-accent)" strokeWidth="14" strokeLinecap="round"/></g><circle cx="51" cy="155" r="25" fill="#beed4c"/><path d="M32 140q28 9 30 36" fill="none" stroke="#edf9af" strokeWidth="3"/></svg></div>
       </section>
+      <div className="home-shortcuts" aria-label="Quick actions">
+        <button onClick={()=>document.getElementById("discover-filters")?.scrollIntoView({behavior:"smooth"})}><Mark name="games"/><span>Public games</span></button>
+        <button onClick={()=>navigate("venues")}><Mark name="venues"/><span>Find a court</span></button>
+        <button onClick={()=>navigate(user?"mine":"signup")}><Mark name="profile"/><span>{user?"My games":"Join the community"}</span></button>
+        <button onClick={()=>navigate(user?"host":"auth")}><Mark name={user?"host":"profile"}/><span>{user?"Host a game":"Sign in"}</span></button>
+      </div>
       <SponsoredVenues onExplore={exploreSponsored} />
       <div className="section-heading">
         <div>
           <span className="overline">GET OUT. GET IN THE GAME.</span>
-          <h2>Explore games & activities</h2>
+          <h2>Public games</h2>
         </div>
         {user ? (
           <button className="text-link" onClick={() => navigate("profile")}>
@@ -333,7 +343,7 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
         </div>
         <button className="primary">Find events ↗</button>
       </form>
-      <details className="venue-discovery" onToggle={e => setVenueFinderOpen(e.currentTarget.open)}><summary>Find courts & activity venues in Lebanon ↗</summary>{venueFinderOpen && <VenueMap config={config} type={lookups.sports.find(s => s.sportId === Number(filters.sportId))?.name}/>}</details>
+      <details className="venue-discovery" onToggle={e => setVenueFinderOpen(e.currentTarget.open)}><summary>Find courts & activity venues in Lebanon ↗</summary>{venueFinderOpen && <VenueMap config={config} type={lookups.sports.find(s => s.sportId === Number(filters.sportId))?.name} subtypeId={Number(filters.sportId)||undefined}/>}</details>
       <Alert>{error}</Alert>
       {loading ? (
         <Loading />
@@ -797,13 +807,16 @@ function MyGames({ user, select }) {
     </>
   );
 }
-function Profile({ lookups, onSaved }) {
+function Profile({ lookups, onSaved, onPayments }) {
   const { data, error, loading } = useResource("/me/profile");
+  const [chosenSports,setChosenSports] = useState(null);
   const [saving, setSaving] = useState(false),
     [problem, setProblem] = useState("");
+  useEffect(()=>{if(data)setChosenSports(data.sports.filter(id=>lookups.sports.some(s=>s.sportId===id&&s.categorySlug==="sports")).slice(0,3));},[data,lookups.sports]);
   async function submit(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if(!chosenSports?.length){setProblem("Choose at least one sport.");return;}
     setSaving(true);
     setProblem("");
     try {
@@ -812,7 +825,9 @@ function Profile({ lookups, onSaved }) {
         bio: f.get("bio"),
         area: f.get("area"),
         skillLevel: f.get("skill"),
-        sportIds: f.getAll("sports").map(Number),
+        sportIds: chosenSports,
+        gender:f.get("gender")||null,
+        dateOfBirth:f.get("dateOfBirth")||null,
       });
       onSaved(f.get("name"));
     } catch (e) {
@@ -826,9 +841,10 @@ function Profile({ lookups, onSaved }) {
   return (
     <div className="form-page">
       <span className="overline">MORE YOU. BETTER GAMES.</span>
-      <h1>What’s your game?</h1>
+      <h1>My profile</h1>
+      <button className="secondary" onClick={onPayments}>Payments & deposits</button>
       <p className="lead">
-        Your favorite sports, activities and neighborhood shape what you see
+        Your favorite sports and neighborhood shape what you see
         when you sign in.
       </p>
       <form className="panel form-grid" onSubmit={submit}>
@@ -862,22 +878,9 @@ function Profile({ lookups, onSaved }) {
             ))}
           </select>
         </label>
-        <fieldset className="form-wide">
-          <legend>Your favorite sports & activities</legend>
-          <div className="preference-sports">
-            {lookups.sports.map((s) => (
-              <label className="checkbox" key={s.sportId}>
-                <input
-                  type="checkbox"
-                  name="sports"
-                  value={s.sportId}
-                  defaultChecked={data.sports.includes(s.sportId)}
-                />
-                {s.name}
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <label>Gender<select aria-label="Gender" name="gender" defaultValue={data.profile.gender||""}><option value="">Not provided</option>{genderOptions.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
+        <label>Date of birth<input type="date" name="dateOfBirth" min="1900-01-01" max={todayInput()} defaultValue={data.profile.dateOfBirth?.slice(0,10)||""}/></label>
+        <div className="form-wide"><SportsPicker sports={lookups.sports} value={chosenSports||[]} onChange={setChosenSports}/></div>
         <label className="form-wide">
           A little about you
           <textarea
@@ -1006,9 +1009,10 @@ function Payments({ config, user }) {
     </div>
   );
 }
-function Auth({ config, onLogin, destination }) {
+function Auth({ config, lookups, onLogin, destination, initialMode="login", onModeChange }) {
   const reset = useRef(new URLSearchParams(location.search).get("reset"));
-  const [mode, setMode] = useState(reset.current ? "reset" : "login"),
+  const [sports,setSports] = useState([]);
+  const [mode, setMode] = useState(reset.current ? "reset" : initialMode),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
@@ -1018,6 +1022,7 @@ function Auth({ config, onLogin, destination }) {
   async function submit(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if(mode==="register"&&sports.length<1){setError("Choose at least one sport (up to three).");return;}
     setBusy(true);
     setError("");
     setMessage("");
@@ -1040,15 +1045,11 @@ function Auth({ config, onLogin, destination }) {
           email: f.get("email"),
           password: f.get("password"),
           displayName: f.get("name"),
+          ...(mode==="register"?{gender:f.get("gender"),dateOfBirth:f.get("dateOfBirth"),sportIds:sports}:{}),
         });
-        if (mode === "register") {
-          setMode("login");
-          setMessage(r.message);
-        } else {
-          await refreshCsrf();
-          const me = await api("/auth/me");
-          onLogin(me);
-        }
+        await refreshCsrf();
+        const me = await api("/auth/me");
+        onLogin(me);
       }
     } catch (e) {
       setError(e.message);
@@ -1057,6 +1058,7 @@ function Auth({ config, onLogin, destination }) {
     }
   }
   function change(m) {
+    if((m==="register"||m==="login")&&onModeChange){onModeChange(m);return;}
     setMode(m);
     setError("");
     setMessage("");
@@ -1120,6 +1122,7 @@ function Auth({ config, onLogin, destination }) {
               <input
                 required
                 name="password"
+                aria-label={mode === "reset" ? "New password" : "Password"}
                 type="password"
                 minLength={mode === "login" ? 1 : 12}
                 maxLength="128"
@@ -1132,6 +1135,12 @@ function Auth({ config, onLogin, destination }) {
               )}
             </label>
           )}
+          {mode==="register"&&<>
+            <div className="signup-demographics"><label>Gender<select aria-label="Gender" required name="gender" defaultValue=""><option value="" disabled>Choose an option</option>{genderOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+            <label>Date of birth<input required type="date" name="dateOfBirth" min="1900-01-01" max={todayInput()} autoComplete="bday"/></label></div>
+            <SportsPicker sports={lookups.sports} value={sports} onChange={next=>{setSports(next);if(next.length)setError("");}}/>
+            <p className="muted privacy-note">Gender and date of birth stay in your private profile. Sports preferences personalize your feed.</p>
+          </>}
           <Alert>{error}</Alert>
           {message && (
             <p className="success" role="status">
@@ -1192,8 +1201,8 @@ function App() {
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
-    document.documentElement.style.backgroundColor = next === "light" ? "#f5f6f0" : "#111a16";
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#f5f6f0" : "#111a16");
+    document.documentElement.style.backgroundColor = next === "light" ? "#f6f6f8" : "#000000";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#f6f6f8" : "#000000");
     setTheme(next);
     try { localStorage.setItem("gameon-theme", next); } catch { /* Storage is optional. */ }
   }
@@ -1288,7 +1297,7 @@ function App() {
   }, []);
   useEffect(() => {document.title = `${page === "details" ? "Event details" : pageLabels[page] || "Sign in"} · GameOn`;}, [page]);
   function navigate(next, eventId = selected, replace = false) {
-    if (next === "auth" && page !== "auth") setReturnAfterAuth({page: protectedPages.has(page) || page === "details" ? page : "discover",selected});
+    if (["auth","signup"].includes(next) && !["auth","signup"].includes(page)) setReturnAfterAuth({page: protectedPages.has(page) || page === "details" ? page : "discover",selected});
     setPage(next);
     if (next === "details") setSelected(eventId);
     const href=routeHref(next,eventId);
@@ -1308,13 +1317,7 @@ function App() {
       notify(e.message);
     }
   }
-  const links = [
-    ["discover", "Discover"],
-    ["mine", "My games"],
-    ["inbox", "Inbox"],
-    ["profile", "My profile"],
-    ["payments", "Payments"],
-  ];
+  const links = [["discover","Discover"],["venues","Venues"],...(user?[["mine","My games"],["inbox","Inbox"],["profile","My profile"]]:[])];
   return (
     <>
       <a className="skip" href="#main" onClick={e => {e.preventDefault();document.getElementById("main")?.focus();}}>
@@ -1328,7 +1331,7 @@ function App() {
           game<span>on</span>
           <i />
         </button>
-        <nav aria-label="Main navigation">
+        <nav aria-label="Main navigation" style={{"--nav-count":links.length}}>
           {links.map(([key, label]) => (
             <a
               key={key}
@@ -1354,9 +1357,9 @@ function App() {
           <button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
             {theme === "dark" ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 13a9 9 0 0 1-9.8-9.8A9 9 0 1 0 20.8 13Z"/></svg>}
           </button>
-          <button className="primary small" onClick={() => navigate("host")}>
+          {user && <button className="primary small" onClick={() => navigate("host")}>
             + Host event
-          </button>
+          </button>}
           {authReady &&
             (user ? (
               <button className="user-button" onClick={logout} title="Sign out">
@@ -1364,9 +1367,7 @@ function App() {
                 <span className="signout">Sign out</span>
               </button>
             ) : (
-              <button className="text-link" onClick={() => navigate("auth")}>
-                Sign in ↗
-              </button>
+              <div className="public-auth-actions"><button className="text-link" onClick={() => navigate("auth")}>Sign in ↗</button><button className="primary small" onClick={()=>navigate("signup")}>Sign up</button></div>
             ))}
         </div>
       </header>
@@ -1386,6 +1387,7 @@ function App() {
                 revision={revision}
               />
             )}
+            {page === "venues" && <VenueDirectory lookups={lookups} config={config} user={user}/>}
             {page === "details" && (
               <Details
                 key={selected}
@@ -1414,6 +1416,7 @@ function App() {
             {page === "profile" && user && (
               <Profile
                 lookups={lookups}
+                onPayments={()=>navigate("payments")}
                 onSaved={(name) => {
                   setUser({ ...user, name });
                   setRevision((v) => v + 1);
@@ -1430,9 +1433,13 @@ function App() {
               />
             )}{" "}
             {page === "payments" && <Payments config={config} user={user} />}
-            {page === "auth" && (
+            {["auth","signup"].includes(page) && (
               <Auth
+                key={page}
                 config={config}
+                lookups={lookups}
+                initialMode={page==="signup"?"register":"login"}
+                onModeChange={mode=>navigate(mode==="register"?"signup":"auth",selected,true)}
                 destination={protectedPages.has(returnAfterAuth?.page) || returnAfterAuth?.page === "details" ? returnAfterAuth.page : undefined}
                 onLogin={(me) => {
                   setUser(me);
@@ -1440,14 +1447,14 @@ function App() {
                   const destination=returnAfterAuth || {page:"discover",selected:null};
                   navigate(destination.page,destination.selected,true);
                   setReturnAfterAuth(null);
-                  notify(`Welcome back, ${me.name.split(" ")[0]}.`);
+                  notify(`${page === "signup" ? "Welcome" : "Welcome back"}, ${me.name.split(" ")[0]}.`);
                 }}
               />
             )}
           </>
         )}
       </main>
-      {page !== "host" && page !== "auth" && <button className="primary floating-host" onClick={() => navigate("host")} aria-label="Create an event">+ Host event</button>}
+      {user && page !== "host" && !["auth","signup"].includes(page) && <button className="primary floating-host" onClick={() => navigate("host")} aria-label="Create an event">+ Host event</button>}
       <footer>
         <button className="brand" onClick={() => navigate("discover")}>
           game<span>on</span>

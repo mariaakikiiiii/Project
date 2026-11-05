@@ -44,7 +44,16 @@ try { await maps.Verify(new LocationInput("Invalid", double.NaN,35.5,null), Canc
 catch (ArgumentException) { Check(true, "non-finite coordinates rejected before Google request"); }
 var coordinate = MapsLocations.Coordinate("@Latitude",33.8912345m);
 Check(coordinate.Precision == 10 && coordinate.Scale == 7, "ADO.NET preserves pin precision with explicit decimal scale");
-Console.WriteLine($"PASS: {passed} payment policy/security and map-validation checks. No database, Google API calls or money movement involved.");
+var onboardingToday=new DateOnly(2026,11,5);
+Check(OnboardingPolicy.ValidBirth(new DateOnly(1995,5,12),onboardingToday),"valid signup birth date accepted");
+Check(!OnboardingPolicy.ValidBirth(null,onboardingToday),"missing birth date rejected");
+Check(!OnboardingPolicy.ValidBirth(onboardingToday.AddDays(1),onboardingToday),"future birth date rejected");
+Check(!OnboardingPolicy.ValidBirth(new DateOnly(1899,12,31),onboardingToday),"out-of-range birth date rejected");
+Check(OnboardingPolicy.ValidSports([1])&&OnboardingPolicy.ValidSports([1,2,3]),"one and three distinct sport IDs accepted");
+Check(!OnboardingPolicy.ValidSports([])&&!OnboardingPolicy.ValidSports([1,2,3,4]),"empty and four-sport selections rejected");
+Check(!OnboardingPolicy.ValidSports([1,1])&&!OnboardingPolicy.ValidSports([-1]),"duplicate and non-positive preferences rejected");
+Check(OnboardingPolicy.Genders.Contains("PreferNotToSay"),"privacy-preserving gender option available");
+Console.WriteLine($"PASS: {passed} payment/security, map and onboarding policy checks. No database, Google API calls or money movement involved.");
 sealed class TestClock : TimeProvider { public DateTimeOffset Now = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero); public override DateTimeOffset GetUtcNow() => Now; }
 sealed class TestEnvironment(string name) : IHostEnvironment
 {

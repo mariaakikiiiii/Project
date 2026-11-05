@@ -1,3 +1,5 @@
+CURRENT RELEASE: read docs/ONBOARDING-VENUES.md. Stop API/Vite, back up GameOn, apply database/20-onboarding-venues.sql after migration 18, then run the complete updated backend and frontend. Ordinary SSMS mode; no SQLCMD.
+
 LATEST: read docs/DEPOSITS.md. Apply migration 18 after migration 16 before running the current API.
 
 LATEST UPDATE: read docs/UPDATE-16.md. Existing databases need migration 16 before running the updated API. Do not reinstall the database.

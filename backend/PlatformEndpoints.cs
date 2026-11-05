@@ -37,14 +37,17 @@ public static class PlatformEndpoints
         app.MapPut("/api/me/profile", async (ProfileInput input, ClaimsPrincipal user, Database db, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(input.DisplayName) || input.DisplayName.Length > 80 || input.Bio?.Length > 400
-                || input.Area?.Length > 80 || input.SportIds is null || input.SportIds.Length > 20
+                || input.Area?.Length > 80 || !OnboardingPolicy.ValidSports(input.SportIds)
+                || (input.Gender is not null && !OnboardingPolicy.Genders.Contains(input.Gender))
+                || (input.DateOfBirth is not null && !OnboardingPolicy.ValidBirth(input.DateOfBirth,DateOnly.FromDateTime(DateTime.UtcNow)))
                 || !new[] { "All levels", "Beginner", "Intermediate", "Advanced" }.Contains(input.SkillLevel))
                 return Results.BadRequest(new { error = "Check your name, bio, area and sports preferences." });
             await db.Call("dbo.SaveProfile", ct, P("@UserId", SqlDbType.Int, Id(user)),
                 P("@DisplayName", SqlDbType.NVarChar, input.DisplayName.Trim(), 80),
                 P("@Bio", SqlDbType.NVarChar, input.Bio ?? "", 400), P("@Area", SqlDbType.NVarChar, input.Area, 80),
                 P("@SkillLevel", SqlDbType.VarChar, input.SkillLevel, 16),
-                P("@SportsJson", SqlDbType.NVarChar, JsonSerializer.Serialize(input.SportIds), 2000));
+                P("@SportsJson", SqlDbType.NVarChar, JsonSerializer.Serialize(input.SportIds), 2000),
+                P("@Gender",SqlDbType.VarChar,input.Gender,20),P("@DateOfBirth",SqlDbType.Date,input.DateOfBirth?.ToDateTime(TimeOnly.MinValue)));
             return Results.Ok(new { message = "Profile saved. Your next discovery feed will use these preferences." });
         }).RequireAuthorization();
         app.MapPut("/api/games/{id:int}", async (int id, EditGameInput input, ClaimsPrincipal user, Database db, CancellationToken ct) =>
@@ -105,7 +108,7 @@ public static class PlatformEndpoints
     public static Microsoft.Data.SqlClient.SqlParameter Price(decimal value) => new("@CostPerPlayer", SqlDbType.Decimal)
     { Precision = 10, Scale = 2, Value = value };
 }
-record ProfileInput(string DisplayName, string? Bio, string? Area, string SkillLevel, int[] SportIds);
+record ProfileInput(string DisplayName, string? Bio, string? Area, string SkillLevel, int[] SportIds, string? Gender=null, DateOnly? DateOfBirth=null);
 record EditGameInput(int Revision, DateTimeOffset StartsAt, short Capacity, string? Description, decimal CostPerPlayer, string Currency, short SponsoredSlots);
 record ForgotInput(string Email);
 record ResetInput(string Token, string Password);

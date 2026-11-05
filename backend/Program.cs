@@ -106,16 +106,25 @@ app.Use(async (ctx, next) =>
 });
 app.MapGet("/api/csrf", (HttpContext c, IAntiforgery anti) =>
     Results.Ok(new { token = anti.GetAndStoreTokens(c).RequestToken }));
-app.MapPost("/api/auth/register", async (Register input, Database db, IPasswordHasher<string> hasher, CancellationToken ct) =>
+app.MapPost("/api/auth/register", async (Register input, HttpContext ctx, Database db, IPasswordHasher<string> hasher, CancellationToken ct) =>
 {
     if (!ValidEmail(input.Email) || string.IsNullOrWhiteSpace(input.DisplayName) || input.DisplayName.Length > 80
         || input.Password is null || input.Password.Length < 12 || input.Password.Length > 128)
         return Results.BadRequest(new { error = "Use a valid email, name (1–80 characters), and password (12–128 characters)." });
+    if (!OnboardingPolicy.Genders.Contains(input.Gender ?? "") || !OnboardingPolicy.ValidBirth(input.DateOfBirth,DateOnly.FromDateTime(DateTime.UtcNow)) || !OnboardingPolicy.ValidSports(input.SportIds))
+        return Results.BadRequest(new {error="Choose a gender option, a valid date of birth, and 1–3 distinct sports."});
     var email = input.Email.Trim().ToLowerInvariant();
-    await db.Call("dbo.RegisterUser", ct, P("@Email", SqlDbType.NVarChar, email, 254),
+    var registered = (await db.Call("dbo.RegisterUser", ct, P("@Email", SqlDbType.NVarChar, email, 254),
         P("@DisplayName", SqlDbType.NVarChar, input.DisplayName.Trim(), 80),
-        P("@PasswordHash", SqlDbType.NVarChar, hasher.HashPassword(email, input.Password), 512));
-    return Results.Ok(new { message = "Registered. Sign in to continue." });
+        P("@PasswordHash", SqlDbType.NVarChar, hasher.HashPassword(email, input.Password), 512),
+        P("@Gender",SqlDbType.VarChar,input.Gender,20),P("@DateOfBirth",SqlDbType.Date,input.DateOfBirth!.Value.ToDateTime(TimeOnly.MinValue)),
+        P("@SportsJson",SqlDbType.NVarChar,System.Text.Json.JsonSerializer.Serialize(input.SportIds),2000)))[0][0];
+    var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] {
+        new Claim(ClaimTypes.NameIdentifier,registered["userId"]!.ToString()!),new Claim(ClaimTypes.Name,registered["displayName"]!.ToString()!),
+        new Claim("securityVersion",registered["securityVersion"]!.ToString()!)
+    },CookieAuthenticationDefaults.AuthenticationScheme));
+    await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,principal);
+    return Results.Ok(new { message = "Your account is ready." });
 }).RequireRateLimiting("auth");
 app.MapPost("/api/auth/login", async (Login input, HttpContext ctx, Database db, IPasswordHasher<string> hasher, CancellationToken ct) =>
 {
@@ -143,7 +152,7 @@ app.MapPost("/api/auth/logout", async (HttpContext ctx) => { await ctx.SignOutAs
 app.MapGet("/api/auth/me", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
     var profile = (await db.Call("dbo.GetProfile", ct, P("@UserId", SqlDbType.Int, UserId(u))))[0][0];
-    return Results.Ok(new { name = profile["displayName"], userId = UserId(u) });
+    return Results.Ok(new { name = profile["displayName"], userId = UserId(u), canManageVenues=profile["canManageVenues"] });
 }).RequireAuthorization();
 app.MapGet("/api/lookups", async (Database db, CancellationToken ct) =>
 {
@@ -213,11 +222,12 @@ app.MapDelete("/api/games/{id:int}/participation", async (int id, ClaimsPrincipa
 app.MapPlatform();
 app.MapCommercial();
 app.MapDeposits();
+app.MapVenueDirectory();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254
     && System.Net.Mail.MailAddress.TryCreate(email.Trim(), out var address) && address.Address == email.Trim();
-record Register(string Email, string DisplayName, string Password);
+record Register(string Email, string DisplayName, string Password, string? Gender=null, DateOnly? DateOfBirth=null, int[]? SportIds=null);
 record Login(string Email, string Password);
 record NewGame(int SportId, int VenueId, DateTimeOffset StartsAt, short Capacity, string? Description = "", decimal CostPerPlayer = 0, string Currency = "USD", short SponsoredSlots = 0, LocationInput? Location = null);
 

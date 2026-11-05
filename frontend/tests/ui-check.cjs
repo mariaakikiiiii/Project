@@ -82,7 +82,7 @@ const fs = require("node:fs"),
     make(4, types[9], { venue: "Adventure Arena" }),
     make(5, types[14], { capacity: 2, playerCount: 2 }),
   ];
-  let mapsEnabled = false, lastCreatedLocation = null, anonymousPrivateRequests = 0;
+  let mapsEnabled = false, lastCreatedLocation = null, anonymousPrivateRequests = 0, registered = false;
   let viewer = 0,
     profileSaved = false,
     created = false,
@@ -97,7 +97,7 @@ const fs = require("node:fs"),
   const memberships = new Map(),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  const me = () => ({ userId: viewer, name: viewer === 1 ? "Maria" : "Nour" });
+  const me = () => ({ userId: viewer, name: viewer === 7 ? "NewPlayer" : viewer === 1 ? "Maria" : "Nour", canManageVenues:false });
   const key = (id) => `${viewer}:${id}`;
   await page.route("**/api/**", async (route) => {
     const req = route.request(),
@@ -121,6 +121,10 @@ const fs = require("node:fs"),
         ],
         venues: [{ venueId: 1, name: "Central Court", area: "Beirut" }],
       };
+    else if(p === "/api/venues/search") {
+      const q=(url.searchParams.get("q")||"").toLowerCase();
+      data=[{venueId:1,name:"Central Court",area:"Beirut",address:"Fixture court",latitude:null,longitude:null,isVerified:false,isDemo:true,hasActivityDetails:false},{venueId:2,name:"North Field",area:"Jounieh",address:"Fixture field",latitude:null,longitude:null,isVerified:false,isDemo:true,hasActivityDetails:false}].filter(v=>`${v.name} ${v.area} ${v.address}`.toLowerCase().includes(q));
+    }
     else if (p === "/api/venues/sponsored")
       data = [
         {
@@ -155,6 +159,8 @@ const fs = require("node:fs"),
     else if (p === "/api/auth/me") {
       status = viewer ? 200 : 401;
       data = viewer ? me() : {};
+    } else if (p === "/api/auth/register") {
+      const b=req.postDataJSON();assert.equal(b.gender,"Female");assert.equal(b.dateOfBirth,"1998-05-14");assert.deepEqual(b.sportIds,[1,2,3]);registered=true;viewer=7;data={message:"Your account is ready."};
     } else if (p === "/api/auth/login") {
       viewer = req.postDataJSON().email === "nour@example.invalid" ? 3 : 1;
       data = { name: me().name };
@@ -322,12 +328,13 @@ const fs = require("node:fs"),
         profile: {
           ...me(),
           email: "maria@example.invalid",
-          displayName: "Maria",
+          displayName:viewer===7?"NewPlayer":"Maria",
+          gender:viewer===7?"Female":null,dateOfBirth:viewer===7?"1998-05-14":null,
           bio: "Weekend player",
           area: "Beirut",
           skillLevel: "Beginner",
         },
-        sports: [1],
+        sports:viewer===7?[1,2,3]:[1],
       };
     else if (p === "/api/me/profile" && m === "PUT") {
       assert.deepEqual(req.postDataJSON().sportIds, [1, 3]);
@@ -406,19 +413,56 @@ const fs = require("node:fs"),
     .getByRole("heading", { name: "Featured venues" })
     .waitFor();
   const nav=page.getByRole("navigation",{name:"Main navigation"});
-  await nav.getByRole("link",{name:"My games",exact:true}).click();
+  for(const name of ["My games","Inbox","My profile"])assert.equal(await nav.getByRole("link",{name,exact:true}).count(),0);
+  assert.equal(await page.getByRole("button",{name:"+ Host event",exact:true}).count(),0);
+  await nav.getByRole("link",{name:"Venues",exact:true}).click();
+  await page.getByRole("heading",{name:"Find your venue",exact:true}).waitFor();
+  await page.getByLabel("Town or neighborhood",{exact:true}).fill("Jounieh");
+  assert.equal(await page.getByRole("link",{name:/Google Maps/}).count(),0);
+  await page.getByRole("button",{name:"Search venues",exact:true}).click();
+  await page.locator(".venue-results").getByText("North Field",{exact:true}).waitFor();
+  assert.match(page.url(),/#\/venues$/);
+  assert.equal(await page.getByRole("link",{name:/Google Maps/}).count(),0);
+  await page.getByRole("button",{name:"View venue",exact:true}).click();
+  await page.getByRole("heading",{name:"North Field",exact:true}).waitFor();
+  assert.match(await page.getByRole("link",{name:"Open selected venue in Google Maps ↗",exact:true}).getAttribute("href"),/North%20Field/);
+  await page.screenshot({path:path.join(os.tmpdir(),"GameOn-venue-search.png"),animations:"disabled"});
+  await page.getByRole("button",{name:"Sign up",exact:true}).click();
+  await page.getByLabel("Your name",{exact:true}).fill("NewPlayer");
+  await page.getByLabel("Email",{exact:true}).fill("new@example.invalid");
+  await page.getByLabel("Password",{exact:true}).fill("ui-only-fake-password");
+  await page.getByLabel("Gender",{exact:true}).selectOption("Female");
+  await page.getByLabel("Date of birth",{exact:true}).fill("1998-05-14");
+  await page.getByRole("button",{name:"Join the crew ↗",exact:true}).click();
+  await page.getByText("Choose at least one sport (up to three).",{exact:true}).waitFor();
+  assert.equal(registered,false);
+  for(const sport of ["Basketball","Football (Soccer)","Padel"])await page.getByLabel(sport,{exact:true}).check();
+  assert.equal(await page.getByLabel("Tennis",{exact:true}).isDisabled(),true);
+  assert.equal(await page.getByLabel("Paintball",{exact:true}).count(),0);
+  await page.setViewportSize({width:390,height:844});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:path.join(os.tmpdir(),"GameOn-signup-mobile.png"),fullPage:true,animations:"disabled"});
+  await page.setViewportSize({width:1440,height:1080});
+  await page.screenshot({path:path.join(os.tmpdir(),"GameOn-signup.png"),fullPage:true,animations:"disabled"});
+  await page.getByRole("button",{name:"Join the crew ↗",exact:true}).click();
+  await page.getByRole("heading",{name:"Your next game, NewPlayer.",exact:true}).waitFor();
+  assert(registered);
+  for(const name of ["My games","Inbox","My profile"])assert.equal(await nav.getByRole("link",{name:new RegExp(name)}).count(),1);
+  await nav.getByRole("link",{name:"My profile",exact:true}).click();
+  await page.getByLabel("Date of birth",{exact:true}).waitFor();
+  assert.equal(await page.getByLabel("Date of birth",{exact:true}).inputValue(),"1998-05-14");
+  assert.equal(await page.getByLabel("Gender",{exact:true}).inputValue(),"Female");
+  assert.equal(await page.locator(".sports-picker input:checked").count(),3);
+  await page.getByRole("button",{name:/Sign out/}).click();
+  await page.getByRole("heading",{name:"Find your next game.",exact:true}).waitFor();
+  for(const name of ["My games","Inbox","My profile"])assert.equal(await nav.getByRole("link",{name,exact:true}).count(),0);
+  // A manually opened protected bookmark still uses the sign-in gate, without exposing private menu links.
+  await page.goto((process.env.GAMEON_UI_URL||"http://127.0.0.1:5173")+"/#/my-games");
   await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
-  assert.match(page.url(), /#\/my-games$/);
-  await page.getByRole("link",{name:"Skip to content",exact:true}).focus();
-  await page.keyboard.press("Enter");
+  await page.getByRole("link",{name:"Skip to content",exact:true}).focus();await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(()=>document.activeElement.id),"main");
-  assert.match(page.url(), /#\/my-games$/);
-
-  assert.equal(await nav.getByRole("link",{name:"My games",exact:true}).getAttribute("aria-current"),"page");
-  await nav.getByRole("link",{name:"Inbox",exact:true}).focus();
-  await page.keyboard.press("Enter");
+  await page.goto((process.env.GAMEON_UI_URL||"http://127.0.0.1:5173")+"/#/inbox");
   await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
-  assert.match(page.url(), /#\/inbox$/);
   await page.goBack();
   await page.getByRole("heading",{name:"My games",exact:true}).waitFor();
   await page.reload();
@@ -452,7 +496,7 @@ const fs = require("node:fs"),
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
   await page.screenshot({ path: path.join(os.tmpdir(), "GameOn-light.png"), fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
-  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--page").trim()), "#111a16");
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--page").trim()), "#000000");
   await page.screenshot({
     path: path.join(os.tmpdir(), "GameOn-desktop.png"),
     fullPage: true,
@@ -491,6 +535,11 @@ const fs = require("node:fs"),
   await page
     .getByLabel("Date & time (your local time)")
     .fill(future.slice(0, 16));
+  await page.getByText("Find Basketball venues in Lebanon",{exact:true}).click();
+  await page.getByLabel("Town or neighborhood",{exact:true}).fill("Jounieh");
+  await page.getByRole("button",{name:"Search venues",exact:true}).click();
+  await page.getByRole("button",{name:"Choose venue",exact:true}).click();
+  assert.equal(await page.getByLabel("Venue",{exact:true}).inputValue(),"2");
   await page.getByLabel("Venue", { exact: true }).selectOption("1");
   await page.getByRole("button", { name: "Continue →" }).click();
   await page.getByLabel("Venue share per person").fill("15");
@@ -588,7 +637,7 @@ const fs = require("node:fs"),
   await page.getByRole("button", { name: "I transferred — submit reference" }).click();
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
   await page.getByRole("button", { name: "Close checkout" }).click();
-  await page.getByRole("link", { name: "Payments", exact: true }).click();
+  await page.getByRole("button",{name:"Payments & venue shares ↗",exact:true}).click();
   await page.getByText(/Paintball at Adventure Arena · USD 15.75 · Awaiting verification/).waitFor();
   await page.locator(".payment-record summary").click();
   await page.getByText("Awaiting verification", {exact:true}).waitFor();
@@ -596,7 +645,9 @@ const fs = require("node:fs"),
   await discover();
   await page.locator(".venue-discovery summary").click();
   await page.locator(".venue-discovery input").fill("Tripoli");
-  assert.match(await page.getByRole("link", {name:"Open Google Maps ↗", exact:true}).getAttribute("href"), /Tripoli/);
+  await page.locator(".venue-discovery").getByRole("button",{name:"Search venues",exact:true}).click();
+  await page.getByText("No venues matched this search. Try a nearby town or another activity. No external page was opened.",{exact:true}).waitFor();
+  assert.equal(await page.getByRole("link",{name:/Open selected venue/}).count(),0);
   await discover();
   await open("Padel","Central Court");
   await page.getByRole("heading",{name:"Call Venue to Reserve",exact:true}).waitFor();
@@ -617,7 +668,7 @@ const fs = require("node:fs"),
   await page.getByText("Reference submitted. Awaiting operator verification. Do not transfer again.",{exact:true}).waitFor();
   assert.equal(depositBooking.depositStatus,"PENDING");
   await page.getByRole("button",{name:"Close deposit checkout"}).click();
-  await page.getByRole("link",{name:"Payments",exact:true}).click();
+  await page.getByRole("button",{name:"Payments & venue shares ↗",exact:true}).click();
   await page.getByText("Padel at Central Court · Deposit pending",{exact:true}).waitFor();
   await page.getByRole("button", { name: /Sign out/ }).click();
   await login("maria@example.invalid", "Maria");
@@ -710,7 +761,7 @@ const fs = require("node:fs"),
   assert.deepEqual(errors, []);
   await browser.close();
   console.log(
-    "PASS: signed-out/in My games and Inbox navigation, post-login destination, keyboard/mobile taps, Back/reload, 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, 5% cash fee breakdown, $1 deposit/5% quote and cash-balance option, venue tel link, deposit roster badge and pending reference/history, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
+    "PASS: guest-only navigation, automatic signup with private demographics/1–3 sports, in-app Jounieh search/selected map link, signed-out/in My games and Inbox navigation, post-login destination, keyboard/mobile taps, Back/reload, 17-type catalog, category/open-spot filtering, sports/activity wizard, preferences, host controls, sponsored places, 5% cash fee breakdown, $1 deposit/5% quote and cash-balance option, venue tel link, deposit roster badge and pending reference/history, signed-demo checkout UI, manual Whish reference submission/history, map search links, Lebanese listing filtering/custom pin (Google library fixtures), persisted dark/light themes, reduced motion, waitlist, notifications and mobile layout (API fixtures).",
   );
 })().catch((error) => {
   console.error(error);

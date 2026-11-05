@@ -90,3 +90,14 @@ for path, method in [("/games/1/deposit-quote", "GET"), ("/games/1/deposit-check
     assert call(path, method, {} if method != "GET" else None)[0] == 401, path
 assert configuration["serviceFeeRate"] == 0.05
 print("PASS: deposit quote, authorization, reference, history, review and venue-management routes deny anonymous callers; current service fee is 5%.")
+
+assert call('/operator/venues', 'POST', {})[0] == 401
+assert call('/venues/search?q=' + 'a' * 101)[0] == 400
+assert call('/venues/search?subtypeId=0')[0] == 400
+headers = {'X-CSRF-TOKEN': json.loads(call('/csrf')[1])['token']}
+registration = {'email': 'smoke@example.invalid', 'displayName': 'Smoke',
+                'password': 'smoke-validation-only', 'gender': 'Female',
+                'dateOfBirth': '1998-05-14', 'sportIds': [1]}
+for change in [{'gender': None}, {'dateOfBirth': None}, {'sportIds': []}, {'sportIds': [1, 2, 3, 4]}]:
+    assert call('/auth/register', 'POST', {**registration, **change}, headers)[0] == 400
+print('PASS: venue creation denies anonymous callers; venue search and signup reject invalid input before database access.')

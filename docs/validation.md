@@ -87,3 +87,14 @@ A user reported version 16 recorded with missing venue columns, missing manual-t
 ## Navigation and discovery redesign
 
 Frontend production build and Chromium fixture suite passed for distinct My games/Inbox destinations signed out and signed in, no anonymous private resource calls, post-login My games return, keyboard activation, active route indicators, Back/reload, touch navigation at 390px and overflow at 390px/820px. Existing booking/deposit/Whish/map fixture flows remained covered. The Sportciety reference URL could not be inspected because the workspace proxy denied that destination; no exact visual reproduction is claimed. No database migration or backend permission change was made for this frontend update.
+
+## Signup, directory and screenshot design update — 2026-11-05
+
+- Solution build passed with zero warnings/errors. Frontend production build passed.
+- 32 payment, signature, map and onboarding policy checks passed, including missing/future/out-of-range DOB and 0/4/duplicate sport preference rejection.
+- Chromium API-fixture checks passed: guest/private menu visibility, signup with private demographics and three sports, fourth-sport disabling, automatic authentication, profile persistence requests, in-app Jounieh results, selected-venue optional Maps link, host directory selection, existing account/payment/event workflows, mobile signup overflow and dark/light layouts. Google library responses were fixtures; no live Google credentials were used.
+- Actual HTTPS middleware smoke checks passed, including CSRF, anonymous operator creation denial, invalid venue-search parameters, and rejection of missing gender/DOB or 0/4 signup sports before database access.
+- ScriptDom parsed all SQL scripts, including decoded constant dynamic SQL in migration 20. Inspection also moved new procedure grants after procedure creation. Syntax parsing does not establish SQL engine binding, permissions or transactional execution.
+- SQL Server remains unavailable here: migration 20 and rollback fixtures 21 have **not been executed** against SQL Server. Database-backed signup, directory creation, procedure ownership chaining and live Google coverage require verification on an authorized test database. No money or live Whish requests were involved.
+
+Current preview screenshots use synthetic fixtures. Original directory seed entries are marked demo; no nationwide catalog, court availability or competitor offers/ratings are fabricated.
