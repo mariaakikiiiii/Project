@@ -34,7 +34,8 @@ public static class DepositEndpoints
             Results.Ok((await db.Call("dbo.ListDepositReviews", ct, P("@UserId", SqlDbType.Int, User(user))))[0])).RequireAuthorization();
         app.MapPost("/api/deposits/{id:guid}/review", async (Guid id, DepositReview input, ClaimsPrincipal user, Database db, CancellationToken ct) =>
         {
-            if (input.Decision is not "VERIFY" and not "REJECT" and not "REFUND" and not "FORFEIT" || string.IsNullOrWhiteSpace(input.Note) || input.Note.Trim().Length is < 4 or > 400
+            if (input.Decision == "FORFEIT") return Results.BadRequest(new { error = "No-show forfeiture is disabled until a written no-show policy is approved." });
+            if (input.Decision is not "VERIFY" and not "REJECT" and not "REFUND" || string.IsNullOrWhiteSpace(input.Note) || input.Note.Trim().Length is < 4 or > 400
                 || (input.Decision == "REFUND" && !ValidReference(input.RefundReference))) return Results.BadRequest(new { error = "Enter a valid review, note and actual refund reference when applicable." });
             return Results.Ok((await db.Call("dbo.ReviewDeposit", ct, P("@DepositID", SqlDbType.UniqueIdentifier, id), P("@UserId", SqlDbType.Int, User(user)),
                 P("@Decision", SqlDbType.VarChar, input.Decision, 20), P("@Note", SqlDbType.NVarChar, input.Note.Trim(), 400), P("@RefundReference", SqlDbType.NVarChar, input.RefundReference?.Trim(), 100)))[0][0]);

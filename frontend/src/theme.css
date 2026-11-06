@@ -537,3 +537,20 @@ h1,h2 { letter-spacing: -.035em; }
 
 .preference-sports .checkbox span { min-width: 0; }
 .preference-sports .checkbox:has(input:disabled) { opacity: .55; cursor: default; }
+
+/* Migration 22: trust, attendance and venue provenance */
+.pill.ok { background: var(--positive-soft); color: var(--positive); }
+.pill.warn { background: #facc1518; color: var(--text); border: 1px dashed var(--muted); }
+.trust h2, .trust h3 { margin: 4px 0 8px; }
+.trust-facts { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.trust-facts li { padding-left: 22px; position: relative; line-height: 1.45; }
+.trust-facts li::before { content: "•"; position: absolute; left: 6px; color: var(--muted); }
+.trust-facts li.ok::before { content: "✓"; color: var(--positive); }
+.trust-facts li.warn::before { content: "!"; color: var(--accent); font-weight: 700; }
+.venue-facts { display: grid; gap: 8px; margin: 10px 0; }
+.venue-facts div { display: grid; grid-template-columns: minmax(110px, 34%) 1fr; gap: 8px; }
+.venue-facts dt { color: var(--muted); font-size: 13px; }
+.venue-facts dd { margin: 0; }
+.button-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.button-row > * { min-height: 44px; }
+@media (max-width: 520px) { .venue-facts div { grid-template-columns: 1fr; gap: 2px; } }

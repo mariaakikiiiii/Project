@@ -223,6 +223,7 @@ app.MapPlatform();
 app.MapCommercial();
 app.MapDeposits();
 app.MapVenueDirectory();
+app.MapAttendance();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

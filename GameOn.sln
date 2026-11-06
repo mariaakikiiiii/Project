@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -33,7 +33,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{3E
 		database\18-security-deposits.sql = database\18-security-deposits.sql
 		database\19-security-deposit-tests.sql = database\19-security-deposit-tests.sql
 		database\20-onboarding-venues.sql = database\20-onboarding-venues.sql
-		database\21-onboarding-venue-tests.sql = database\21-onboarding-venue-tests.sql
+		database\21-onboarding-venue-tests.sql = database\21-onboarding-venue-tests.sql
+		database\22-deposit-lifecycle-venues.sql = database\22-deposit-lifecycle-venues.sql
+		database\23-deposit-lifecycle-tests.sql = database\23-deposit-lifecycle-tests.sql
+		database\24-lebanon-venue-directory.sql = database\24-lebanon-venue-directory.sql
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Frontend", "{A84E09AF-B36B-5094-B1F1-2EC930A27B35}"
@@ -44,7 +47,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Fro
 		frontend\src\api.js = frontend\src\api.js
 		frontend\src\components\CategoryTabs.jsx = frontend\src\components\CategoryTabs.jsx
 		frontend\src\components\EventWizard.jsx = frontend\src\components\EventWizard.jsx
-		frontend\src\components\PaymentSelector.jsx = frontend\src\components\PaymentSelector.jsx
 		frontend\src\domain.js = frontend\src\domain.js
 		frontend\src\main.jsx = frontend\src\main.jsx
 		frontend\src\navigation.js = frontend\src\navigation.js
@@ -53,7 +55,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Fro
 		frontend\public\theme-init.js = frontend\public\theme-init.js
 		frontend\src\components\VenueMap.jsx = frontend\src\components\VenueMap.jsx
 		frontend\src\components\SportsPicker.jsx = frontend\src\components\SportsPicker.jsx
-		frontend\src\components\VenueDirectory.jsx = frontend\src\components\VenueDirectory.jsx
+		frontend\src\components\VenueDirectory.jsx = frontend\src\components\VenueDirectory.jsx
+		frontend\src\components\GameTrust.jsx = frontend\src\components\GameTrust.jsx
+		frontend\src\components\VenueEditor.jsx = frontend\src\components\VenueEditor.jsx
 		frontend\src\components\ManualWhish.jsx = frontend\src\components\ManualWhish.jsx
 		frontend\src\components\PaymentHistory.jsx = frontend\src\components\PaymentHistory.jsx
 		frontend\src\components\DepositCheckout.jsx = frontend\src\components\DepositCheckout.jsx
@@ -73,8 +77,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Guides", "Guides", "{DB2CD8
 		docs\COMMERCIAL.md = docs\COMMERCIAL.md
 		docs\UPDATE-16.md = docs\UPDATE-16.md
 		docs\DEPOSITS.md = docs\DEPOSITS.md
-		docs\UI-UPDATE.md = docs\UI-UPDATE.md
-		docs\ONBOARDING-VENUES.md = docs\ONBOARDING-VENUES.md
+		docs\ONBOARDING-VENUES.md = docs\ONBOARDING-VENUES.md
+		docs\UPDATE-22.md = docs\UPDATE-22.md
 		docs\REPAIR-16.md = docs\REPAIR-16.md
 	EndProjectSection
 EndProject

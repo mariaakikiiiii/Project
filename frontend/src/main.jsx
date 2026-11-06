@@ -23,6 +23,7 @@ import CategoryTabs from "./components/CategoryTabs";
 import GameForm from "./components/EventWizard";
 import SportsPicker,{genderOptions,todayInput} from "./components/SportsPicker";
 import VenueDirectory from "./components/VenueDirectory";
+import GameTrust from "./components/GameTrust";
 
 function Mark({ name }) {
   const paths = {
@@ -544,6 +545,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
             </ul>
           </section>
           <VenueContactCard game={g}/>
+          <GameTrust id={id} user={user} game={g} roster={data.roster} notify={notify}/>
           <section className="panel">
             <div className="section-heading">
               <h2>Meet you here</h2>
@@ -1432,7 +1434,7 @@ function App() {
                 refresh={refreshInbox}
               />
             )}{" "}
-            {page === "payments" && <Payments config={config} user={user} />}
+            {page === "payments" && user && <Payments config={config} user={user} />}
             {["auth","signup"].includes(page) && (
               <Auth
                 key={page}
@@ -1461,9 +1463,9 @@ function App() {
           <i />
         </button>
         <p>A little less online. A lot more on court.</p>
-        <button className="text-link" onClick={() => navigate("payments")}>
-          Payments & venue shares ↗
-        </button>
+        {user && <button className="text-link" onClick={() => navigate("payments")}>
+          Payments & deposits ↗
+        </button>}
         <span>Made for the way Lebanon plays.</span>
       </footer>
       {toast && (
