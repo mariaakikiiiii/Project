@@ -9,7 +9,7 @@ import {
   playable,
   mapQuery,
 } from "./domain";
-import {protectedPages, pageLabels, routeHref, readRoute} from "./navigation";
+import {protectedPages, pageLabels, routeHref, readRoute, inviteFor} from "./navigation";
 import "./style.css";
 import "./theme.css";
 import DepositCheckout from "./components/DepositCheckout";
@@ -26,6 +26,12 @@ import VenueDirectory from "./components/VenueDirectory";
 import GameTrust from "./components/GameTrust";
 import { MiniMap } from "./components/LocationPicker";
 import Wallet from "./components/Wallet";
+import Courts from "./components/Courts";
+import ClubManager from "./components/ClubManager";
+import Chat, { stopLive } from "./components/Chat";
+import Rewards from "./components/Rewards";
+import GameAccess from "./components/GameAccess";
+import AccountHub from "./components/AccountHub";
 
 function Mark({ name }) {
   const paths = {
@@ -37,6 +43,8 @@ function Mark({ name }) {
     discover: "m3 11 9-8 9 8v10h-6v-6H9v6H3Z",
     games: "M3 5h18v16H3zM7 2v6m10-6v6M3 11h18",
     inbox: "M18 8a6 6 0 0 0-12 0c0 8-3 8-3 10h18c0-2-3-2-3-10M10 21h4",
+    courts: "M3 4h18v16H3zM12 4v16M3 12h18",
+    chat: "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z",
     wallet: "M3 7h15a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H3zM3 7V5a2 2 0 0 1 2-2h11v4M16 14h2",
     profile: "M20 21a8 8 0 0 0-16 0M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
     host: "M12 5v14M5 12h14",
@@ -403,7 +411,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
     data,
     loading,
     error: loadError,
-  } = useResource(`/games/${id}`, version);
+  } = useResource(`/games/${id}${inviteFor(id) ? `?invite=${inviteFor(id)}` : ""}`, version);
   async function act(path, method = "POST", message = "Your game is updated.") {
     if (!user) return navigate("auth");
     setBusy(true);
@@ -547,6 +555,7 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
               ))}
             </ul>
           </section>
+          <GameAccess id={id} user={user} game={g} isHost={host} isMember={member} invite={inviteFor(id)} notify={notify} onChange={() => setVersion((v) => v + 1)}/>
           <VenueContactCard game={g}/>
           <GameTrust id={id} user={user} game={g} roster={data.roster} notify={notify}/>
           <section className="panel">
@@ -1316,6 +1325,7 @@ function App() {
     try {
       await api("/auth/logout", "POST");
       await refreshCsrf();
+      stopLive();
       setUser(null);
       setReturnAfterAuth(null);
       navigate("discover",null,true);
@@ -1324,7 +1334,7 @@ function App() {
       notify(e.message);
     }
   }
-  const links = [["discover","Discover"],["venues","Venues"],...(user?[["mine","My games"],["wallet","Wallet"],["inbox","Inbox"],["profile","My profile"]]:[])];
+  const links = user ? [["discover","Discover"],["courts","Courts"],["mine","My games"],["chat","Chat"],["profile","Me"]] : [["discover","Discover"],["courts","Courts"],["venues","Venues"]];
   return (
     <>
       <a className="skip" href="#main" onClick={e => {e.preventDefault();document.getElementById("main")?.focus();}}>
@@ -1361,6 +1371,9 @@ function App() {
           ))}
         </nav>
         <div className="header-actions">
+          {user && <a className="bell" href={routeHref("inbox")} aria-label={`Inbox${notifications?.unreadCount ? `, ${notifications.unreadCount} unread` : ""}`} onClick={e => {e.preventDefault();navigate("inbox");}}>
+            <Mark name="inbox" />{notifications?.unreadCount > 0 && <span className="badge">{Math.min(notifications.unreadCount, 99)}</span>}
+          </a>}
           <button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
             {theme === "dark" ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 13a9 9 0 0 1-9.8-9.8A9 9 0 1 0 20.8 13Z"/></svg>}
           </button>
@@ -1421,7 +1434,7 @@ function App() {
             )}{" "}
             {page === "mine" && user && <MyGames user={user} select={select} />}{" "}
             {page === "profile" && user && (
-              <Profile
+              <AccountHub user={user} lookups={lookups} unread={notifications?.unreadCount} navigate={navigate}><Profile
                 lookups={lookups}
                 onPayments={()=>navigate("payments")}
                 onSaved={(name) => {
@@ -1430,7 +1443,7 @@ function App() {
                   notify("Preferences saved. Your feed is now more you.");
                   navigate("discover");
                 }}
-              />
+              /></AccountHub>
             )}{" "}
             {page === "inbox" && user && (
               <Inbox
@@ -1441,6 +1454,10 @@ function App() {
             )}{" "}
             {page === "payments" && user && <Payments config={config} user={user} />}
             {page === "wallet" && user && <Wallet config={config} />}
+            {page === "courts" && <Courts lookups={lookups} user={user} />}
+            {page === "chat" && user && <Chat user={user} />}
+            {page === "rewards" && user && <Rewards />}
+            {page === "club" && user && <ClubManager lookups={lookups} />}
             {["auth","signup"].includes(page) && (
               <Auth
                 key={page}

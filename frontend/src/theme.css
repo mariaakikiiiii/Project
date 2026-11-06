@@ -611,3 +611,67 @@ h1,h2 { letter-spacing: -.035em; }
 .amount.minus { color: var(--text); }
 .danger-text { color: var(--accent); }
 .payment-choice small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+/* Courts, clubs, chat, rewards (migration 27) */
+.pro-badge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .06em; color: #111; background: linear-gradient(135deg, #ff6b00, #facc15); vertical-align: middle; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.club-card { text-align: left; display: grid; gap: 6px; cursor: pointer; color: var(--text); border: 1px solid var(--line); }
+.club-card:hover, .club-card:focus-visible { border-color: var(--green, #22c55e); }
+.filters-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.filters-row input { flex: 1 1 220px; min-height: 44px; }
+.filters-row select { min-height: 44px; }
+.club-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+.day-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.day-chips .chip { flex: 0 0 auto; padding: 0 14px; }
+.slot-grid { display: grid; gap: 18px; }
+.slot-row h3 { margin: 0 0 8px; }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
+.slot { min-height: 56px; border-radius: 14px; border: 2px solid var(--line); background: var(--surface); color: var(--text); display: grid; place-content: center; gap: 2px; text-align: center; cursor: pointer; font: inherit; }
+.slot small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px; }
+.slot.free { border-color: var(--green, #22c55e); }
+.slot.free.peak { border-color: #facc15; }
+.slot.mine { border-color: transparent; background: linear-gradient(135deg, #ff6b00, #facc15); color: #111; }
+.slot.mine small { color: #111; }
+.slot.booked { opacity: .55; cursor: default; }
+.slot.blocked { background: repeating-linear-gradient(45deg, var(--surface), var(--surface) 6px, var(--line) 6px, var(--line) 12px); cursor: default; }
+.slot.past { opacity: .3; cursor: default; }
+.slot.selected { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slot:disabled { cursor: default; }
+.slot-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--muted); }
+.slot-legend .slot { display: inline-block; min-height: 14px; width: 18px; border-radius: 4px; padding: 0; }
+.sheet { position: fixed; inset: 0; z-index: 60; display: grid; align-items: end; justify-items: center; background: #000a; padding: 16px; }
+.sheet-card { position: relative; width: min(520px, 100%); max-height: 90vh; overflow-y: auto; background: var(--surface-raised, var(--surface)); border: 1px solid var(--line); border-radius: 24px; padding: 24px; display: grid; gap: 12px; }
+@media (min-width: 761px) { .sheet { align-items: center; } }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.kpi { padding: 18px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 4px; }
+.kpi span, .kpi small { color: var(--muted); font-size: 13px; }
+.kpi strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+.kpi .pos { color: var(--positive); } .kpi .neg { color: var(--accent); }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding-top: 8px; }
+.bar { flex: 1; min-width: 4px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #facc15, #ff6b00); }
+.segmented.tabs-4 { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.access-panel .spots { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
+.access-panel .spots strong.open { color: var(--positive); } .access-panel .spots strong.full { color: var(--accent); }
+.chat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.chat-list button { width: 100%; display: flex; gap: 12px; align-items: center; text-align: left; padding: 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; min-height: 64px; }
+.chat-main { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.chat-main small { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-kind { font-size: 22px; }
+.thread { display: grid; grid-template-rows: auto 1fr auto; height: calc(100vh - 190px); min-height: 380px; max-width: 760px; margin: 0 auto; }
+.thread-head { display: flex; gap: 12px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.thread-head h2 { flex: 1; margin: 0; font-size: 20px; }
+.messages { list-style: none; margin: 0; padding: 14px 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.messages li { max-width: 80%; align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 18px 18px 18px 4px; padding: 8px 12px; }
+.messages li.mine { align-self: flex-end; border: 0; border-radius: 18px 18px 4px 18px; background: linear-gradient(135deg, #ff6b00, #facc15); color: #111; }
+.messages li small { display: block; font-size: 11px; opacity: .75; }
+.messages li p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.composer input { flex: 1; min-height: 48px; }
+.hub-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.hub-tile { display: grid; gap: 4px; text-decoration: none; color: var(--text); border: 1px solid var(--line); }
+.hub-tile:hover, .hub-tile:focus-visible { border-color: var(--accent); }
+.hub-tile span, .hub-tile small { color: var(--muted); } .hub-tile strong { font-size: 22px; }
+.pro-card.active { border-color: #facc15; }
+.bell { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; border: 1px solid var(--line); color: var(--text); }
+.bell svg { width: 20px; height: 20px; }
+.bell .badge { position: absolute; top: -4px; right: -4px; }

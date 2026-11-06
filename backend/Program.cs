@@ -49,6 +49,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     o.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = 403; return Task.CompletedTask; };
 });
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR(o => { o.MaximumReceiveMessageSize = 4096; });
 builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
 builder.Services.AddRateLimiter(o =>
 {
@@ -81,14 +82,16 @@ app.Use(async (ctx, next) =>
     { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = "Record already exists." }); }
     catch (SqlException ex) when (ex.Number is 50005)
     { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
+    catch (SqlException ex) when (ex.Number is 50003 && ex.Message.Length < 200 && !ex.Message.Contains("permission", StringComparison.OrdinalIgnoreCase))
+    { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50006)
     { ctx.Response.StatusCode = 402; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message, code = "wallet_insufficient" }); }
     catch (SqlException ex) when (ex.Number is 50003)
     { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "You do not have permission to perform this action." }); }
     catch (SqlException ex) when (ex.Number is 50004)
-    { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = "This game changed. Refresh to see the latest details and available places." }); }
+    { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50001)
-    { ctx.Response.StatusCode = 404; await ctx.Response.WriteAsJsonAsync(new { error = "Game not found." }); }
+    { ctx.Response.StatusCode = 404; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50002 or 547)
     { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = ex.Number == 50002 ? ex.Message : "Invalid game, user, sport or venue." }); }
     catch (SqlException ex) when (ex.Number is 1205 or -2)
@@ -99,6 +102,14 @@ app.Use(async (ctx, next) =>
         ctx.Response.StatusCode = 500;
         await ctx.Response.WriteAsJsonAsync(new { error = "Request failed. Check server configuration and logs." });
     }
+});
+// Real-time hub: only same-origin browsers may connect (blocks cross-site WebSocket hijacking).
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/hubs") && ctx.Request.Headers.Origin is { Count: > 0 } origin
+        && (!Uri.TryCreate(origin.ToString(), UriKind.Absolute, out var o) || !string.Equals(o.Host, ctx.Request.Host.Host, StringComparison.OrdinalIgnoreCase)))
+    { ctx.Response.StatusCode = 403; return; }
+    await next();
 });
 app.UseAuthentication(); app.UseAuthorization(); app.UseRateLimiter();
 app.Use(async (ctx, next) =>
@@ -180,15 +191,21 @@ app.MapGet("/api/games", async (int? sportId, string? date, string? area, bool? 
         day = parsed;
     }
     if (area?.Length > 80) return Results.BadRequest(new { error = "Area is too long." });
-    return Results.Ok((await db.Call("dbo.DiscoverGames", ct,
+    var hidden = await CommunityEndpoints.HiddenGames(db, user.Identity?.IsAuthenticated == true ? UserId(user) : null, ct);
+    var found = (await db.Call("dbo.DiscoverGames", ct,
         P("@SportId", SqlDbType.Int, sportId), P("@Date", SqlDbType.Date, day),
         P("@Area", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(area) ? null : area, 80),
         P("@UserId", SqlDbType.Int, user.Identity?.IsAuthenticated == true ? UserId(user) : null),
         P("@FreeOnly", SqlDbType.Bit, freeOnly ?? false),
-        P("@CategorySlug", SqlDbType.VarChar, category, 24), P("@OpenOnly", SqlDbType.Bit, openOnly ?? false)))[0]);
+        P("@CategorySlug", SqlDbType.VarChar, category, 24), P("@OpenOnly", SqlDbType.Bit, openOnly ?? false)))[0];
+    return Results.Ok(found.Where(g => !hidden.Contains(Convert.ToInt32(g["gameId"]))));
 }).RequireRateLimiting("browse");
-app.MapGet("/api/games/{id:int}", async (int id, ClaimsPrincipal user, Database db, CancellationToken ct) =>
+app.MapGet("/api/games/{id:int}", async (int id, string? invite, ClaimsPrincipal user, Database db, CancellationToken ct) =>
 {
+    // Private games are visible only to the host, players, requesters and holders of the invite link.
+    var access = (await db.Call("dbo.GetGameAccess", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, user.Identity?.IsAuthenticated == true ? UserId(user) : null),
+        P("@InviteCode", SqlDbType.Char, invite is { Length: 10 } ? invite.ToUpperInvariant() : null, 10)))[0];
+    if (access.Count == 0 || !Convert.ToBoolean(access[0]["canView"])) return Results.NotFound();
     var sets = await db.Call("dbo.GetGame", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, user.Identity?.IsAuthenticated == true ? UserId(user) : null));
     return sets[0].Count == 0 ? Results.NotFound() : Results.Ok(new { game = sets[0][0], roster = sets[1], membership = sets[2].FirstOrDefault() });
 }).RequireRateLimiting("browse");
@@ -232,6 +249,7 @@ app.MapDeposits();
 app.MapVenueDirectory();
 app.MapAttendance();
 app.MapWallet();
+app.MapCommunity();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

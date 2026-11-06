@@ -23,6 +23,11 @@ MIGRATIONS = {
              guard=""" IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name=N'CK__DepositBo__Payme__2057CCD0')
   THROW 50002,'The deposit payment-method constraint is not the expected one. Stop and report this message.',1;
 """),
+    27: dict(name='27-clubs-community', prior=25,
+             title='clubs & courts, classes & coaches, public/private games with approval, friends & chat, loyalty points, rewards, GameOn Pro.',
+             guard=""" IF OBJECT_ID(N'dbo.WalletLedger',N'U') IS NULL OR OBJECT_ID(N'dbo.EventAttendance',N'U') IS NULL
+  THROW 50002,'Migrations 22 and 25 must be installed first.',1;
+"""),
 }
 
 
@@ -47,6 +52,9 @@ def build(v, m):
     src = ROOT / f"scripts/migration-bodies/{m['name']}.sql.txt"
     out_path = ROOT / f"database/{m['name']}.sql"
     text = src.read_text(encoding='utf-8')
+    # SSMS/sqlcmd may read files in the Windows code page: keep migrations pure ASCII so text never gets garbled.
+    bad = sorted({c for c in text if ord(c) > 127})
+    if bad: raise SystemExit(f'{v}: non-ASCII characters {bad!r} in {src.name}; use plain ASCII in SQL text')
     batches = re.split(r'^GO\s*$', text, flags=re.M | re.I)
     header = next(b for b in batches if 'BEGIN TRANSACTION;' in b and 'CREATE OR ALTER' not in b)
     ddl = header.split('BEGIN TRANSACTION;', 1)[1]
