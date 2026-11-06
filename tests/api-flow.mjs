@@ -17,13 +17,23 @@ class Client {
     const headers = { Cookie: [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ") };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (csrf && method !== "GET") headers["X-CSRF-TOKEN"] = this.csrf;
-    const r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    let r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    // All test users share one IP, so the API's per-IP rate limits apply to the whole run: wait and retry once.
+    if (r.status === 429 && !path.startsWith("/api/auth")) { await new Promise((ok) => setTimeout(ok, 61000)); r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }); }
     for (const c of r.headers.getSetCookie?.() || []) { const [kv] = c.split(";"); const i = kv.indexOf("="); this.cookies.set(kv.slice(0, i), kv.slice(i + 1)); }
     return r;
   }
   async json(path, method, body, opt) { const r = await this.req(path, method, body, opt); const t = await r.text(); return { status: r.status, body: t ? JSON.parse(t) : null }; }
 }
 const tag = Date.now().toString(36);
+// SAFETY: prove the running API is connected to the test database before creating anything.
+// A marker venue is written directly to GAMEON_TEST_DB; the API must return it, otherwise we stop.
+sql(`INSERT dbo.Venues(Name,Area,Address,ListingStatus,DirectoryNote) VALUES(N'zz-test-marker-${tag}',N'Testville',N'Marker','Unverified',NULL)`);
+const marker = await (await fetch(`${BASE}/api/venues/search?q=zz-test-marker-${tag}`)).json().catch(() => []);
+if (!Array.isArray(marker) || marker.length !== 1) {
+  console.error(`STOP: the API at ${BASE} is not connected to ${DB}. Nothing was created through it. Start the API against the test database (or set GAMEON_API).`);
+  process.exit(3);
+}
 const sports = (await (await fetch(BASE + "/api/lookups")).json()).sports.filter((s) => s.categorySlug === "sports").map((s) => s.sportId);
 async function register(name) {
   const c = new Client();
@@ -101,6 +111,39 @@ check("Player opens refund dispute", dispute.status === 200, JSON.stringify(disp
 const open = (await op.json("/api/disputes")).body.disputes.find((x) => x.gameId === gameId);
 check("Operator sees open dispute", Boolean(open));
 check("Operator resolves dispute", (await op.json(`/api/disputes/${open.disputeId}/resolve`, "POST", { outcome: "RefundOwed", note: "Refund bounced; resend" })).status === 200);
+// --- Real map: place search + custom pin verified on the server (live OpenStreetMap, no Google key)
+const places = await host.json("/api/places/search?q=Jounieh");
+check("Place search finds Jounieh (live OpenStreetMap)", places.status === 200 && places.body.length > 0, JSON.stringify(places.body).slice(0, 200));
+const link = await host.json("/api/places/from-link", "POST", { url: "https://www.google.com/maps/place/Test/@33.98,35.62,17z/data=!3d33.9810000!4d35.6180000" });
+check("Google Maps link turned into a pin", link.status === 200 && Math.abs(link.body.latitude - 33.981) < 1e-6, JSON.stringify(link.body));
+check("Non-Google link refused", (await host.json("/api/places/from-link", "POST", { url: "https://example.com/@33.9,35.6,15z" })).status === 400);
+const pinned = await host.json("/api/games", "POST", { sportId: sports[0], venueId: 0, startsAt: start, capacity: 3, costPerPlayer: 3, currency: "USD",
+  location: { name: "Jounieh seaside court", latitude: link.body.latitude, longitude: link.body.longitude, placeId: null } });
+check("Host creates game at own map pin (server verified in Lebanon)", pinned.status === 201, JSON.stringify(pinned.body));
+const abroad = await host.json("/api/games", "POST", { sportId: sports[0], venueId: 0, startsAt: start, capacity: 3, costPerPlayer: 0, currency: "USD",
+  location: { name: "Not Lebanon", latitude: 33.51, longitude: 36.29, placeId: null } });
+check("Pin outside Lebanon (Damascus) refused by server", abroad.status === 400, JSON.stringify(abroad.body));
+const walletGame = pinned.body.gameId, wRev = (await p2.json(`/api/games/${walletGame}`)).body.game.revision;
+
+// --- Wallet: top-up (operator-verified), $1 join, instant refund, withdrawal
+check("Empty wallet cannot join (402)", (await p1.json(`/api/games/${walletGame}/wallet-join`, "POST", { idempotencyKey: crypto.randomUUID(), revision: wRev })).status === 402);
+const tk = crypto.randomUUID();
+const top = await p2.json("/api/me/wallet/top-ups", "POST", { idempotencyKey: tk, amount: 5 });
+check("Repeated top-up request returns same top-up", top.status === 200 && (await p2.json("/api/me/wallet/top-ups", "POST", { idempotencyKey: tk, amount: 5 })).body.topUpId === top.body.topUpId);
+await p2.json(`/api/me/wallet/top-ups/${top.body.topUpId}/reference`, "POST", { reference: `WT-${tag}-top` });
+check("Unverified top-up does not credit balance", Number((await p2.json("/api/me/wallet")).body.summary.balance) === 0);
+check("Player cannot approve own top-up", (await p2.json(`/api/operator/wallet/top-ups/${top.body.topUpId}`, "POST", { decision: "VERIFY", note: "self" })).status === 403);
+check("Operator verifies top-up", (await op.json(`/api/operator/wallet/top-ups/${top.body.topUpId}`, "POST", { decision: "VERIFY", note: "On GameOn Whish statement" })).status === 200);
+check("Balance is $5", Number((await p2.json("/api/me/wallet")).body.summary.balance) === 5);
+const jk = crypto.randomUUID();
+const [j1, j2] = await Promise.all([p2.json(`/api/games/${walletGame}/wallet-join`, "POST", { idempotencyKey: jk, revision: wRev }), p2.json(`/api/games/${walletGame}/wallet-join`, "POST", { idempotencyKey: jk, revision: wRev })]);
+const afterJoin = (await p2.json("/api/me/wallet")).body.summary.balance;
+check("Double-tap wallet join: one seat, charged $1 once", j1.status === 200 && j2.status === 200 && Number(afterJoin) === 4 && sql(`SELECT COUNT(*) FROM dbo.Participations WHERE GameId=${walletGame} AND UserId=${p2.id}`) === "1", `${j1.status}/${j2.status} bal=${afterJoin} ${JSON.stringify(j2.body)}`);
+check("Host cancel returns $1 to wallet instantly", (await host.json(`/api/games/${walletGame}/cancel`, "POST")).status === 200 && Number((await p2.json("/api/me/wallet")).body.summary.balance) === 5);
+const wd = await p2.json("/api/me/wallet/withdrawals", "POST", { idempotencyKey: crypto.randomUUID(), amount: 2, whishNumber: "+96171123456" });
+check("Withdrawal request holds money", wd.status === 200 && Number((await p2.json("/api/me/wallet")).body.summary.balance) === 3);
+check("Operator records withdrawal as sent", (await op.json(`/api/operator/wallet/withdrawals/${wd.body.withdrawalId}`, "POST", { decision: "SENT", note: "Sent from GameOn Whish", reference: `OUT-${tag}` })).status === 200);
+check("Ledger total equals balances", (() => { const t = sql("SELECT CASE WHEN (SELECT COALESCE(SUM(Balance),0) FROM dbo.WalletAccounts)=(SELECT COALESCE(SUM(Amount),0) FROM dbo.WalletLedger) THEN 1 ELSE 0 END"); return t === "1"; })());
 check("Host hold blocks hosting", (await op.json(`/api/operator/hosts/${host.id}/hold`, "POST", { hold: true, reason: "API test hold" })).status === 200
   && (await host.json("/api/games", "POST", { sportId: sports[0], venueId: hariri.venueId, startsAt: start, capacity: 4, costPerPlayer: 0, currency: "USD" })).status === 403);
 check("Logout ends session", (await p1.json("/api/auth/logout", "POST")).status === 204 && (await p1.json("/api/me/profile")).status === 401);

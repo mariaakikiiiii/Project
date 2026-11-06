@@ -1,5 +1,7 @@
 # Latest update
 
+**Newest: migration 25.** The GameOn wallet ($1 joins from an in-app balance, instant refunds to the wallet), hosting at any real place in Lebanon on a map, and the game-page scroll fix. Read [docs/UPDATE-25.md](docs/UPDATE-25.md). Run `database/25-wallet.sql` once in SSMS, then `npm ci` in `frontend`.
+
 **Current update: migration 22.** Read [docs/UPDATE-22.md](docs/UPDATE-22.md). Run `database/22-deposit-lifecycle-venues.sql`, then `database/24-lebanon-venue-directory.sql`, on your existing database (version 20). It adds attendance-based $1 deposit refunds, disputes, host holds, a sourced venue directory and the Google Maps setup steps. Earlier notes below are historical.
 
 **Current update — database + backend + frontend:** [signup, in-app venue search and the screenshot-inspired design](docs/ONBOARDING-VENUES.md). Apply **migration 20 after migration 18** before starting the new API. Guest menus hide private pages; signup requires gender, DOB and 1–3 sports.

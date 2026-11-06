@@ -2,7 +2,7 @@
 -- Example: restore a COPY_ONLY backup of GameOn as GameOn_Tests, apply migration 22 there, then:
 --   sqlcmd -S localhost -E -C -b -d GameOn_Tests -i database\23-deposit-lifecycle-tests.sql
 -- Creates fixture users/games (marked @gameon.invalid). Never run on your real database.
-SET NOCOUNT ON; SET XACT_ABORT OFF;
+SET NOCOUNT ON; SET XACT_ABORT OFF; SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;
 IF DB_NAME() NOT LIKE N'%[_]Tests' THROW 50002,'Run these tests only on a disposable *_Tests database.',1;
 IF NOT EXISTS(SELECT 1 FROM dbo.PlatformMigrations WHERE Version=22) THROW 50002,'Apply migration 22 to this test database first.',1;
 DECLARE @tag nvarchar(12)=LEFT(REPLACE(CONVERT(nvarchar(36),NEWID()),'-',''),10);

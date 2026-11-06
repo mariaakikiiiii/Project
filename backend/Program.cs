@@ -14,6 +14,11 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<MapsLocations>();
 builder.Services.AddHttpClient("maps", c => c.Timeout = TimeSpan.FromSeconds(12)).RemoveAllLoggers();
+builder.Services.AddMemoryCache();
+// OpenStreetMap Nominatim requires an identifying User-Agent (https://operations.osmfoundation.org/policies/nominatim/).
+builder.Services.AddHttpClient("nominatim", c => { c.Timeout = TimeSpan.FromSeconds(10); c.DefaultRequestHeaders.UserAgent.ParseAdd("GameOn/1.0 (+https://github.com/mariaakikiiiii/Project)"); }).RemoveAllLoggers();
+// Google short links are followed manually so every hop can be checked against Google hosts.
+builder.Services.AddHttpClient("googlelinks", c => c.Timeout = TimeSpan.FromSeconds(8)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }).RemoveAllLoggers();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<MockPaymentSecurity>();
 builder.Services.AddSingleton<MockPaymentProcessor>();
@@ -76,6 +81,8 @@ app.Use(async (ctx, next) =>
     { ctx.Response.StatusCode = 409; await ctx.Response.WriteAsJsonAsync(new { error = "Record already exists." }); }
     catch (SqlException ex) when (ex.Number is 50005)
     { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
+    catch (SqlException ex) when (ex.Number is 50006)
+    { ctx.Response.StatusCode = 402; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message, code = "wallet_insufficient" }); }
     catch (SqlException ex) when (ex.Number is 50003)
     { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "You do not have permission to perform this action." }); }
     catch (SqlException ex) when (ex.Number is 50004)
@@ -224,6 +231,7 @@ app.MapCommercial();
 app.MapDeposits();
 app.MapVenueDirectory();
 app.MapAttendance();
+app.MapWallet();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

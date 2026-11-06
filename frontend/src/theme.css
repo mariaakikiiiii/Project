@@ -554,3 +554,60 @@ h1,h2 { letter-spacing: -.035em; }
 .button-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .button-row > * { min-height: 44px; }
 @media (max-width: 520px) { .venue-facts div { grid-template-columns: 1fr; gap: 2px; } }
+
+/* Detail page: the booking card used to be sticky on its own and slid over the host
+   panel below it. The whole right column is now one sticky, independently scrollable unit. */
+.booking { position: static; }
+@media (min-width: 761px) {
+  .detail-layout { align-items: start; }
+  .detail-layout > aside {
+    position: sticky; top: 100px; display: grid; gap: 20px;
+    max-height: calc(100vh - 116px); overflow-y: auto; overscroll-behavior: contain;
+    padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .detail-layout > aside > .panel { margin: 0; }
+}
+
+/* Location picker (OpenStreetMap / Leaflet) */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 14px; }
+.segmented button { min-height: 44px; border-radius: 12px; border: 0; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; }
+.segmented button.active { background: linear-gradient(135deg, #ff6b00, #facc15); color: #111; }
+.location-picker { display: grid; gap: 10px; }
+.picker-tools { display: grid; gap: 8px; }
+.picker-row { display: flex; gap: 8px; }
+.picker-row input { flex: 1; min-width: 0; min-height: 44px; }
+.picker-row button { min-height: 44px; white-space: nowrap; }
+.picker-map { height: 340px; border-radius: 18px; border: 2px solid var(--green, #22c55e); overflow: hidden; z-index: 0; }
+.mini-map { height: 220px; border-radius: 18px; border: 1px solid var(--line); overflow: hidden; z-index: 0; }
+.place-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 220px; overflow-y: auto; }
+.place-results button { width: 100%; text-align: left; display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; min-height: 44px; }
+.place-results button:hover, .place-results button:focus-visible { border-color: var(--accent); }
+.place-results small { color: var(--muted); }
+.picked { display: grid; gap: 8px; }
+.go-pin span { display: block; width: 28px; height: 28px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: linear-gradient(135deg, #ff6b00, #facc15); border: 3px solid #111; box-shadow: 0 4px 10px #0007; }
+.small { font-size: 13px; }
+.leaflet-container { font: inherit; background: var(--surface); }
+
+/* Wallet */
+.wallet-page { display: grid; gap: 20px; max-width: 980px; margin: 0 auto; }
+.wallet-hero { padding: 28px; border-radius: 28px; background: radial-gradient(circle at 85% 0%, #ff6b0033, transparent 55%), var(--surface); border: 1px solid var(--line); }
+.wallet-balance { font-size: clamp(44px, 9vw, 72px); font-weight: 800; margin: 6px 0; letter-spacing: -0.03em; background: linear-gradient(135deg, #ff6b00, #facc15); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.wallet-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.wallet-card summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { min-height: 44px; min-width: 64px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-weight: 700; cursor: pointer; }
+.chip.active { border-color: transparent; background: linear-gradient(135deg, #ff6b00, #facc15); color: #111; }
+.notice-card { border: 1px dashed var(--accent); border-radius: 18px; padding: 16px; margin-bottom: 14px; display: grid; gap: 10px; }
+.notice-card.warn { border-color: var(--muted); }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; line-height: 1.5; }
+.copyable { user-select: all; }
+.ledger { list-style: none; margin: 0; padding: 0; display: grid; }
+.ledger li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ledger li span:first-child { display: grid; gap: 2px; }
+.ledger small { color: var(--muted); }
+.amount { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.amount.plus { color: var(--positive); }
+.amount.minus { color: var(--text); }
+.danger-text { color: var(--accent); }
+.payment-choice small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }

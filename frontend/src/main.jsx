@@ -24,6 +24,8 @@ import GameForm from "./components/EventWizard";
 import SportsPicker,{genderOptions,todayInput} from "./components/SportsPicker";
 import VenueDirectory from "./components/VenueDirectory";
 import GameTrust from "./components/GameTrust";
+import { MiniMap } from "./components/LocationPicker";
+import Wallet from "./components/Wallet";
 
 function Mark({ name }) {
   const paths = {
@@ -35,6 +37,7 @@ function Mark({ name }) {
     discover: "m3 11 9-8 9 8v10h-6v-6H9v6H3Z",
     games: "M3 5h18v16H3zM7 2v6m10-6v6M3 11h18",
     inbox: "M18 8a6 6 0 0 0-12 0c0 8-3 8-3 10h18c0-2-3-2-3-10M10 21h4",
+    wallet: "M3 7h15a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H3zM3 7V5a2 2 0 0 1 2-2h11v4M16 14h2",
     profile: "M20 21a8 8 0 0 0-16 0M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
     host: "M12 5v14M5 12h14",
     venues: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
@@ -567,6 +570,8 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                 allowFullScreen
                 src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(config.mapsEmbedApiKey)}&q=${encodeURIComponent(query)}`}
               />
+            ) : g.latitude != null && g.longitude != null ? (
+              <MiniMap latitude={Number(g.latitude)} longitude={Number(g.longitude)} label={g.venue} />
             ) : (
               <a
                 className="map-placeholder"
@@ -1319,7 +1324,7 @@ function App() {
       notify(e.message);
     }
   }
-  const links = [["discover","Discover"],["venues","Venues"],...(user?[["mine","My games"],["inbox","Inbox"],["profile","My profile"]]:[])];
+  const links = [["discover","Discover"],["venues","Venues"],...(user?[["mine","My games"],["wallet","Wallet"],["inbox","Inbox"],["profile","My profile"]]:[])];
   return (
     <>
       <a className="skip" href="#main" onClick={e => {e.preventDefault();document.getElementById("main")?.focus();}}>
@@ -1435,6 +1440,7 @@ function App() {
               />
             )}{" "}
             {page === "payments" && user && <Payments config={config} user={user} />}
+            {page === "wallet" && user && <Wallet config={config} />}
             {["auth","signup"].includes(page) && (
               <Auth
                 key={page}

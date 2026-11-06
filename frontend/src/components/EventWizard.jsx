@@ -3,6 +3,7 @@ import { api } from "../api";
 import { localInput } from "../domain";
 import CategoryTabs from "./CategoryTabs";
 import VenueMap from "./VenueMap";
+import LocationPicker from "./LocationPicker";
 export default function EventWizard({ lookups, existing, onSaved, onBack, config = {} }) {
   const [customLocation, setCustomLocation] = useState(null), [useMap, setUseMap] = useState(false);
   const [finderOpen, setFinderOpen] = useState(false), [chosenVenue,setChosenVenue] = useState(null);
@@ -207,8 +208,13 @@ export default function EventWizard({ lookups, existing, onSaved, onBack, config
               )}
             </label>
             {!existing && <div className="form-wide">
-              {config.mapsPickerAvailable && <label className="checkbox"><input type="checkbox" checked={useMap} onChange={e => setUseMap(e.target.checked)}/>Choose my own location on Google Maps</label>}
-              <details open={useMap || finderOpen} onToggle={e => setFinderOpen(e.currentTarget.open)}><summary>Find {subtype?.name || "activity"} venues in Lebanon</summary>{(useMap || finderOpen) && <VenueMap config={config} type={subtype?.name} subtypeId={subtype?.sportId} onSelect={chooseVenue} value={useMap ? customLocation : null}/>}</details>
+              <div className="segmented" role="radiogroup" aria-label="Where is the game?">
+                <button type="button" role="radio" aria-checked={!useMap} className={!useMap ? "active" : ""} onClick={() => { setUseMap(false); setCustomLocation(null); }}>Venue from the directory</button>
+                <button type="button" role="radio" aria-checked={useMap} className={useMap ? "active" : ""} onClick={() => setUseMap(true)}>Any place on the map</button>
+              </div>
+              {useMap && config.mapProvider !== "google" && <LocationPicker value={customLocation} onChange={setCustomLocation}/>}
+              {useMap && config.mapProvider === "google" && <VenueMap config={config} type={subtype?.name} subtypeId={subtype?.sportId} onSelect={chooseVenue} value={customLocation}/>}
+              {!useMap && <details open={finderOpen} onToggle={e => setFinderOpen(e.currentTarget.open)}><summary>Search {subtype?.name || "activity"} venues by town</summary>{finderOpen && <VenueMap config={config} type={subtype?.name} subtypeId={subtype?.sportId} onSelect={chooseVenue}/>}</details>}
             </div>}
             <p className="muted form-wide">
               You are included in the capacity. Venue availability must be

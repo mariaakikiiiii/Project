@@ -35,13 +35,23 @@ var disabled = new MockPaymentSecurity(new ConfigurationBuilder().Build(), new T
 Check(!disabled.Enabled, "mock checkout flag must be enabled explicitly");
 // Fake Google responses: country validation is tested without credentials or network.
 var mapsConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?> { ["Maps:ServerApiKey"] = "fixture-key" }).Build();
-var maps = new MapsLocations(new MapsClientFactory("LB"), mapsConfig);
+MapsLocations NewMaps(string country) => new(new MapsClientFactory(country), mapsConfig, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()), Microsoft.Extensions.Logging.Abstractions.NullLogger<MapsLocations>.Instance);
+var maps = NewMaps("LB");
 var location = await maps.Verify(new LocationInput(" Host court ", 33.89, 35.5, null), CancellationToken.None);
 Check(location.Name == "Host court" && location.Area == "Beirut" && location.Latitude == 33.89m, "host location normalized from verified Lebanese pin");
-try { await new MapsLocations(new MapsClientFactory("SY"), mapsConfig).Verify(new LocationInput("Outside",33.89,35.5,null), CancellationToken.None); throw new InvalidOperationException("Foreign country accepted"); }
+try { await NewMaps("SY").Verify(new LocationInput("Outside",33.89,35.5,null), CancellationToken.None); throw new InvalidOperationException("Foreign country accepted"); }
 catch (ArgumentException) { Check(true, "bounding rectangle alone cannot authorize a foreign-country pin"); }
 try { await maps.Verify(new LocationInput("Invalid", double.NaN,35.5,null), CancellationToken.None); throw new InvalidOperationException("Non-finite pin accepted"); }
 catch (ArgumentException) { Check(true, "non-finite coordinates rejected before Google request"); }
+// Google Maps links pasted by hosts: parsed offline; only Google hosts accepted; exact pin preferred.
+var pin = await maps.FromGoogleLink("https://www.google.com/maps/place/Fouad+Chehab+Stadium/@33.97,35.61,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d33.9712345!4d35.6123456", CancellationToken.None);
+Check(Math.Abs(pin.Latitude - 33.9712345) < 1e-9 && Math.Abs(pin.Longitude - 35.6123456) < 1e-9 && pin.Name == "Fouad Chehab Stadium", "Google place link: exact pin and name read");
+var q = await maps.FromGoogleLink("https://maps.google.com/?q=33.8938,35.5018", CancellationToken.None);
+Check(Math.Abs(q.Latitude - 33.8938) < 1e-9, "Google ?q=lat,lng link read");
+try { await maps.FromGoogleLink("https://evil.example/maps/@33.9,35.5,15z", CancellationToken.None); throw new InvalidOperationException("Foreign host accepted"); }
+catch (ArgumentException) { Check(true, "non-Google link host refused (no request made)"); }
+try { await maps.FromGoogleLink("https://www.google.com/maps/@48.85,2.35,15z", CancellationToken.None); throw new InvalidOperationException("Paris accepted"); }
+catch (ArgumentException) { Check(true, "link outside Lebanon refused"); }
 var coordinate = MapsLocations.Coordinate("@Latitude",33.8912345m);
 Check(coordinate.Precision == 10 && coordinate.Scale == 7, "ADO.NET preserves pin precision with explicit decimal scale");
 var onboardingToday=new DateOnly(2026,11,5);
