@@ -6,7 +6,7 @@ IF NOT EXISTS(SELECT 1 FROM dbo.PlatformMigrations WHERE Version=27) THROW 50002
 DECLARE @tag nvarchar(12)=LEFT(REPLACE(CONVERT(nvarchar(36),NEWID()),'-',''),10);
 DECLARE @t TABLE(Name nvarchar(200),Pass bit);
 DECLARE @one TABLE(a sql_variant);
-DECLARE @row TABLE(a sql_variant,b sql_variant,c sql_variant,d sql_variant,e sql_variant,f sql_variant,g sql_variant);
+DECLARE @row TABLE(a sql_variant,b sql_variant,c sql_variant,d sql_variant,e sql_variant,f sql_variant,g sql_variant,h sql_variant);
 DECLARE @ok bit,@Op int,@Own int,@Mgr int,@P1 int,@P2 int,@Out int,@V int,@Club int,@Court int,@B1 bigint,@B2 bigint,@k uniqueidentifier,@Code char(10),@G int,@Conv bigint,@Rev int;
 DECLARE @Sport int=(SELECT TOP(1) SubtypeId FROM dbo.Subtypes WHERE Slug='padel');
 DECLARE @Today date=CAST(SYSUTCDATETIME() AS date);
@@ -40,8 +40,8 @@ INSERT @t SELECT 'Peak price at 19:00, base price at 10:00',IIF((SELECT ListPric
 DELETE @sched;
 -- Booking, idempotency, double booking, alignment
 SET @k=NEWID();
-INSERT @row(a,b,c,d,e,f,g) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Ten,@Key=@k; SELECT @B1=CONVERT(bigint,a) FROM @row; DELETE @row;
-INSERT @row(a,b,c,d,e,f,g) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Ten,@Key=@k; DELETE @row;
+INSERT @row(a,b,c,d,e,f,g,h) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Ten,@Key=@k; SELECT @B1=CONVERT(bigint,a) FROM @row; DELETE @row;
+INSERT @row(a,b,c,d,e,f,g,h) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Ten,@Key=@k; DELETE @row;
 INSERT @t SELECT 'Retried booking request creates one booking',IIF((SELECT COUNT(*) FROM dbo.CourtBookings WHERE CourtId=@Court)=1,1,0);
 SET @ok=0; BEGIN TRY EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P2,@StartsAtUtc=@Ten,@Key=@k; END TRY BEGIN CATCH SET @ok=IIF(ERROR_NUMBER()=50004,1,0); END CATCH;
 INSERT @t VALUES('Same slot cannot be booked twice',@ok);
@@ -76,7 +76,7 @@ INSERT @one EXEC dbo.ReviewTopUp @OperatorId=@Op,@TopUpId=@Top,@Decision='VERIFY
 SET @k=NEWID(); INSERT @row(a,b,c) EXEC dbo.BuyPro @UserId=@P1,@Key=@k,@Price=5,@Days=30; DELETE @row;
 INSERT @row(a,b,c) EXEC dbo.BuyPro @UserId=@P1,@Key=@k,@Price=5,@Days=30; DELETE @row;
 INSERT @t SELECT 'Pro bought once from wallet (+100 points)',IIF(dbo.IsPro(@P1)=1 AND (SELECT Balance FROM dbo.WalletAccounts WHERE UserId=@P1)=15 AND (SELECT COUNT(*) FROM dbo.Memberships WHERE UserId=@P1)=1 AND (SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P1)=100,1,0);
-SET @k=NEWID(); INSERT @row(a,b,c,d,e,f,g) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Seven,@Key=@k; SELECT @B2=CONVERT(bigint,a) FROM @row; DELETE @row;
+SET @k=NEWID(); INSERT @row(a,b,c,d,e,f,g,h) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Seven,@Key=@k; SELECT @B2=CONVERT(bigint,a) FROM @row; DELETE @row;
 INSERT @t SELECT 'Pro gets 20% partner discount (30 -> 24) and 30 points',IIF((SELECT Price FROM dbo.CourtBookings WHERE BookingId=@B2)=24 AND (SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P1)=130,1,0);
 -- Rewards
 DECLARE @R int=(SELECT TOP(1) RewardId FROM dbo.Rewards WHERE PointsCost=200);
@@ -87,7 +87,7 @@ SET @k=NEWID(); INSERT @row(a,b,c,d) EXEC dbo.RedeemReward @UserId=@P1,@RewardId
 INSERT @row(a,b,c,d) EXEC dbo.RedeemReward @UserId=@P1,@RewardId=@R,@Key=@k; DELETE @row;
 INSERT @t SELECT 'Redeem charges points once',IIF((SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P1)=30 AND (SELECT COUNT(*) FROM dbo.RewardRedemptions WHERE UserId=@P1)=1,1,0);
 DECLARE @Noon datetime2(0)=DATEADD(hour,2,@Ten),@B3 bigint;
-SET @k=NEWID(); INSERT @row(a,b,c,d,e,f,g) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Noon,@Key=@k,@RedemptionCode=@Code; SELECT @B3=CONVERT(bigint,a) FROM @row; DELETE @row;
+SET @k=NEWID(); INSERT @row(a,b,c,d,e,f,g,h) EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@Noon,@Key=@k,@RedemptionCode=@Code; SELECT @B3=CONVERT(bigint,a) FROM @row; DELETE @row;
 INSERT @t SELECT 'Reward code applied after Pro discount (20 -> 16 -> 14.40)',IIF((SELECT Price FROM dbo.CourtBookings WHERE BookingId=@B3)=14.40,1,0);
 DECLARE @OnePm datetime2(0)=DATEADD(hour,3,@Ten);
 SET @ok=0; SET @k=NEWID(); BEGIN TRY EXEC dbo.BookCourt @CourtId=@Court,@UserId=@P1,@StartsAtUtc=@OnePm,@Key=@k,@RedemptionCode=@Code; END TRY BEGIN CATCH SET @ok=1; END CATCH;

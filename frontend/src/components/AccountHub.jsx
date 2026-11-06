@@ -34,6 +34,7 @@ export default function AccountHub({ user, lookups, unread, navigate, children }
   const tiles = [
     ["wallet", "Wallet", wallet ? money(wallet.balance) : "…", "Top up, pay $1, withdraw"],
     ["rewards", "Rewards & Pro", rewards ? `${rewards.points} pts` : "…", rewards?.isPro ? "Pro member" : "Earn points, go Pro"],
+    ["passes", "Memberships", "Club passes", "QR entry, class packs, visits"],
     ["inbox", "Inbox", unread ? `${unread} new` : "Up to date", "Game updates and approvals"],
     ["payments", "Payments", "Deposits", "Deposits, refunds, disputes"],
     ...(clubs.length ? [["club", "Club manager", clubs.length === 1 ? clubs[0].name : `${clubs.length} clubs`, "Schedule, courts, dashboard"]] : []),
@@ -43,7 +44,7 @@ export default function AccountHub({ user, lookups, unread, navigate, children }
     <section className="stack account-hub">
       <div className="section-heading"><div><span className="overline">YOUR GAMEON</span><h1>{user.name} <ProBadge show={rewards?.isPro} /></h1></div></div>
       <div className="hub-tiles">{tiles.map(([page, title, value, hint]) => (
-        <a key={page} className="panel hub-tile" href={`#/${{ wallet: "wallet", rewards: "rewards", inbox: "inbox", payments: "payments", club: "club", venues: "venues" }[page]}`}
+        <a key={page} className="panel hub-tile" href={`#/${{ wallet: "wallet", rewards: "rewards", inbox: "inbox", payments: "payments", club: "club", venues: "venues", passes: "memberships" }[page]}`}
           onClick={(e) => { if (!e.ctrlKey && !e.metaKey) { e.preventDefault(); navigate(page); } }}>
           <span>{title}</span><strong>{value}</strong><small>{hint}</small></a>))}</div>
       <details className="panel" open={coach} onToggle={(e) => setCoach(e.currentTarget.open)}><summary>Coach profile (appear in Courts → Coaches)</summary>{coach && <CoachProfile lookups={lookups} />}</details>

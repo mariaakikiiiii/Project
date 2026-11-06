@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { SlotGrid } from "./Courts";
 import { money, localTime, nextDays, localDate } from "./community";
+import { Requests, CheckIn, Products, Customers, Inventory, BackOffice, ClassRoster } from "./ClubSuite";
 
 // Club & coach side. Permissions are enforced in SQL; the UI only hides what a role can't use.
 const ROLE_RANK = { Owner: 4, Operator: 4, Manager: 3, Reception: 2, Coach: 1 };
 
 function Schedule({ club, rank }) {
   const days = nextDays(14);
-  const [day, setDay] = useState(days[0]), [data, setData] = useState(null), [v, setV] = useState(0), [armed, setArmed] = useState(null), [guest, setGuest] = useState(""), [msg, setMsg] = useState(""), [error, setError] = useState("");
+  const [day, setDay] = useState(days[0]), [data, setData] = useState(null), [v, setV] = useState(0), [armed, setArmed] = useState(null), [guest, setGuest] = useState(""), [msg, setMsg] = useState(""), [error, setError] = useState(""), [roster, setRoster] = useState(null);
   useEffect(() => { setData(null); api(`/clubs/${club.clubId}/schedule?date=${day}`).then(setData).catch((e) => setError(e.message)); }, [club.clubId, day, v]);
   const key = useRef(crypto.randomUUID());
   // 2-tap toggle: first tap selects a slot, second tap on the same slot blocks/unblocks it.
@@ -39,6 +40,9 @@ function Schedule({ club, rank }) {
           <div className="picker-row"><input placeholder="Guest name" maxLength={80} value={guest} onChange={(e) => setGuest(e.target.value)} /><button className="primary" disabled={!guest.trim()} onClick={bookGuest}>Book walk-in</button></div></div>)}
       {sel && (sel.slotStatus === "Booked" || sel.slotStatus === "Mine") && (
         <div className="panel stack"><h3>{sel.court} · {localTime(sel.localStart)} · {sel.bookedBy}</h3><button className="secondary" onClick={cancelBooking}>Cancel this booking</button></div>)}
+      {sel && sel.slotStatus === "Pending" && <p className="payment-note">This slot has a booking request waiting. Open the Requests tab to approve or decline it.</p>}
+      {data?.classes?.length > 0 && <div className="panel"><h3>Classes this day</h3><ul className="ledger">{data.classes.map((c) => <li key={c.classId}><span><strong>{c.title}</strong><small>{localTime(c.localStart)} · {c.registered}/{c.capacity}{c.coach ? ` · ${c.coach}` : ""}</small></span><button className="secondary" onClick={() => setRoster(c.classId)}>Attendance</button></li>)}</ul></div>}
+      {roster && <ClassRoster classId={roster} onClose={() => setRoster(null)} />}
     </section>
   );
 }
@@ -151,17 +155,24 @@ export default function ClubManager({ lookups }) {
   if (error) return <p className="alert" role="alert">{error}</p>;
   if (!mine) return <p className="muted">Loading…</p>;
   if (!mine.length) return <section className="panel"><h1>Club manager</h1><p>You are not on the staff of a club yet.</p><p className="muted">Clubs join GameOn through a GameOn operator, who links the club to its venue and names the owner. The owner then adds managers, reception and coaches by email.</p></section>;
-  const tabs = [["schedule", "Schedule", 2], ["courts", "Courts & prices", 3], ["classes", "Classes", 1], ["dashboard", "Dashboard", 3]].filter((t) => rank >= t[2]);
+  const tabs = [["schedule", "Schedule", 1], ["requests", "Requests", 2], ["checkin", "Check-in", 2], ["courts", "Courts & prices", 3], ["classes", "Classes", 1], ["products", "Memberships", 3],
+    ["customers", "Customers", 3], ["inventory", "Inventory", 2], ["dashboard", "Dashboard", 3], ["office", "Back office", 4]].filter((t) => rank >= t[2]);
   return (
     <section className="club-manager stack">
       <div className="section-heading"><div><span className="overline">CLUB MANAGER · {club?.clubRole?.toUpperCase()}</span><h1>{club?.name || "Choose a club"}</h1></div>
         {mine.length > 1 && <select aria-label="Club" value={club?.clubId || ""} onChange={(e) => setClub(mine.find((m) => m.clubId === Number(e.target.value)))}><option value="">Choose…</option>{mine.map((m) => <option key={m.clubId} value={m.clubId}>{m.name}</option>)}</select>}</div>
       {club && <>
-        <div className="segmented tabs-4" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
+        <div className="segmented tabs-scroll" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
         {tab === "schedule" && <Schedule club={club} rank={rank} />}
         {tab === "courts" && dash && <CourtsEditor club={club} lookups={lookups} courts={dash.courts} refresh={() => setV((x) => x + 1)} />}
         {tab === "classes" && <ClassesEditor club={club} lookups={lookups} courts={dash?.courts || []} staff={dash?.staff || []} />}
         {tab === "dashboard" && dash && <Dashboard data={dash} club={club} rank={rank} refresh={() => setV((x) => x + 1)} />}
+        {tab === "requests" && <Requests club={club} courts={dash?.courts} rank={rank} onChange={() => setV((x) => x + 1)} />}
+        {tab === "checkin" && <CheckIn club={club} />}
+        {tab === "products" && <Products club={club} />}
+        {tab === "customers" && <Customers club={club} />}
+        {tab === "inventory" && <Inventory club={club} rank={rank} />}
+        {tab === "office" && <BackOffice club={club} />}
       </>}
     </section>
   );

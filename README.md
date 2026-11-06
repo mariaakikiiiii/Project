@@ -1,5 +1,7 @@
 # Latest update
 
+**Newest: migration 29 (features matched to Sportciety).** Pay courts from the wallet, club booking approval, memberships with QR check-in, class packs and attendance, player groups, CRM and broadcasts, inventory, payroll, club payouts, and Shots (photo sharing). Read [docs/UPDATE-29.md](docs/UPDATE-29.md). Run `database/29-club-suite.sql` after 27, then `npm ci` in `frontend`.
+
 **Newest: migration 27.** Clubs & court booking (peak pricing, 2-tap blocking, recurring classes, revenue/net-profit dashboard, staff roles), coaches, public/private games with host approval, friends & live chat (SignalR), Play & Earn points, rewards and GameOn Pro. Read [docs/UPDATE-27.md](docs/UPDATE-27.md). Run `database/27-clubs-community.sql` after 25, then `npm ci` in `frontend`.
 
 **Newest: migration 25.** The GameOn wallet ($1 joins from an in-app balance, instant refunds to the wallet), hosting at any real place in Lebanon on a map, and the game-page scroll fix. Read [docs/UPDATE-25.md](docs/UPDATE-25.md). Run `database/25-wallet.sql` once in SSMS, then `npm ci` in `frontend`.

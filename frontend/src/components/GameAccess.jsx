@@ -4,6 +4,8 @@ import { openChat, ProBadge } from "./community";
 
 // Open spots, public/private, host approval and the game's group chat.
 export default function GameAccess({ id, user, game, isHost, isMember, invite, notify, onChange }) {
+  const [groups, setGroups] = useState([]), [groupId, setGroupId] = useState("");
+  useEffect(() => { if (isHost) api("/me/groups").then(setGroups).catch(() => {}); }, [isHost]);
   const [data, setData] = useState(null), [v, setV] = useState(0), [message, setMessage] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState(""), [copied, setCopied] = useState(false);
   useEffect(() => { api(`/games/${id}/access${invite ? `?invite=${invite}` : ""}`).then(setData).catch(() => {}); }, [id, v, user?.userId, invite]);
   if (!data) return null;
@@ -35,6 +37,7 @@ export default function GameAccess({ id, user, game, isHost, isMember, invite, n
                 onClick={() => run(() => api(`/games/${id}/access`, "PUT", { visibility: vis, joinMode: mode }), "Joining rules updated. Players already in keep their places.")}>{label}</button>))}
           </div>
           {inviteUrl && <div className="picker-row"><input readOnly value={inviteUrl} aria-label="Invite link" onFocus={(e) => e.target.select()} /><button className="secondary" onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); } catch { setCopied(false); } }}>{copied ? "Copied" : "Copy invite"}</button></div>}
+          {groups.length > 0 && <div className="picker-row"><select aria-label="Group to invite" value={groupId} onChange={(e) => setGroupId(e.target.value)}><option value="">Invite one of my groups…</option>{groups.map((g) => <option key={g.groupId} value={g.groupId}>{g.name} ({g.members})</option>)}</select><button className="secondary" disabled={!groupId || busy} onClick={() => run(() => api(`/games/${id}/invite-group`, "POST", { groupId: Number(groupId) }), "Group invited. Each player confirms their own place.")}>Invite</button></div>}
           {data.requests.length > 0 && <ul className="ledger">{data.requests.map((r) => (
             <li key={r.userId}><span><strong>{r.displayName} <ProBadge show={r.isPro} /></strong><small>{r.gamesPlayed} confirmed game{r.gamesPlayed === 1 ? "" : "s"}{r.message ? ` · “${r.message}”` : ""}</small></span>
               <span className="button-row"><button className="primary" disabled={busy} onClick={() => run(() => api(`/games/${id}/join-requests/${r.userId}`, "POST", { approve: true }), `${r.displayName} approved.`)}>Approve</button>

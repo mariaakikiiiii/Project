@@ -250,6 +250,7 @@ app.MapVenueDirectory();
 app.MapAttendance();
 app.MapWallet();
 app.MapCommunity();
+app.MapClubSuite();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

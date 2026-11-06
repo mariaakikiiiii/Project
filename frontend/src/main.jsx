@@ -32,6 +32,7 @@ import Chat, { stopLive } from "./components/Chat";
 import Rewards from "./components/Rewards";
 import GameAccess from "./components/GameAccess";
 import AccountHub from "./components/AccountHub";
+import Passes from "./components/Passes";
 
 function Mark({ name }) {
   const paths = {
@@ -1455,7 +1456,8 @@ function App() {
             {page === "payments" && user && <Payments config={config} user={user} />}
             {page === "wallet" && user && <Wallet config={config} />}
             {page === "courts" && <Courts lookups={lookups} user={user} />}
-            {page === "chat" && user && <Chat user={user} />}
+            {page === "chat" && user && <Chat user={user} lookups={lookups} />}
+            {page === "passes" && user && <Passes />}
             {page === "rewards" && user && <Rewards />}
             {page === "club" && user && <ClubManager lookups={lookups} />}
             {["auth","signup"].includes(page) && (

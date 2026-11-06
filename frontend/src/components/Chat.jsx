@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { HubConnectionBuilder, LogLevel } from "@microsoft/signalr";
 import { api } from "../api";
 import { takePendingChat, ProBadge } from "./community";
+import Shots from "./Shots";
 
 // One shared live connection. The server pushes "message" events only to the signed-in user's own group.
 let connection, starting;
@@ -39,6 +40,28 @@ function Friends({ onOpen }) {
   );
 }
 
+function Groups({ onOpen }) {
+  const [groups, setGroups] = useState(null), [friends, setFriends] = useState([]), [name, setName] = useState(""), [pick, setPick] = useState([]), [v, setV] = useState(0), [error, setError] = useState("");
+  useEffect(() => { api("/me/groups").then(setGroups).catch((e) => setError(e.message)); api("/me/friends").then((f) => setFriends(f.filter((x) => x.status === "Accepted"))).catch(() => {}); }, [v]);
+  async function create(e) { e.preventDefault(); setError(""); try { const r = await api("/me/groups", "POST", { name, memberIds: pick }); setName(""); setPick([]); setV((x) => x + 1); onOpen({ conversationId: r.conversationId, title: name }); } catch (x) { setError(x.message); } }
+  async function leave(g) { if (!confirm(`Leave ${g.name}?`)) return; try { const me = await api("/auth/me"); await api(`/groups/${g.groupId}/members`, "POST", { userId: me.userId, add: false }); setV((x) => x + 1); } catch (x) { setError(x.message); } }
+  return (
+    <section className="stack">
+      {error && <p className="alert" role="alert">{error}</p>}
+      {groups && (groups.length === 0 ? <p className="muted">No groups yet. Make one for your regular crew, then invite the whole group to a game in one tap.</p> :
+        <ul className="ledger">{groups.map((g) => <li key={g.groupId}><span><strong>{g.name}</strong><small>{g.members} players · {g.memberNames}</small></span>
+          <span className="button-row"><button className="secondary" onClick={() => onOpen({ conversationId: g.conversationId, title: g.name })}>Chat</button>{!g.isOwner && <button className="text-link" onClick={() => leave(g)}>Leave</button>}</span></li>)}</ul>)}
+      <form className="panel stack" onSubmit={create}>
+        <h3>New group</h3>
+        <label>Group name<input required maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="Tuesday padel crew" /></label>
+        {friends.length === 0 ? <p className="muted small">Add friends first. Only friends can be in your groups.</p> :
+          <fieldset><legend>Friends to add</legend><div className="preference-sports">{friends.map((f) => <label className="checkbox" key={f.userId}><input type="checkbox" checked={pick.includes(f.userId)} onChange={(e) => setPick(e.target.checked ? [...pick, f.userId] : pick.filter((x) => x !== f.userId))} />{f.displayName}</label>)}</div></fieldset>}
+        <button className="primary" disabled={!name.trim()}>Create group</button>
+      </form>
+    </section>
+  );
+}
+
 function Thread({ conv, me, onBack }) {
   const [messages, setMessages] = useState([]), [body, setBody] = useState(""), [error, setError] = useState(""), [liveOk, setLiveOk] = useState(true);
   const end = useRef();
@@ -72,7 +95,7 @@ function Thread({ conv, me, onBack }) {
   );
 }
 
-export default function Chat({ user }) {
+export default function Chat({ user, lookups }) {
   const [tab, setTab] = useState("chats"), [list, setList] = useState(null), [open, setOpen] = useState(null), [v, setV] = useState(0), [error, setError] = useState("");
   useEffect(() => { api("/chats").then((l) => { setList(l); const pending = takePendingChat(); if (pending) { const c = l.find((x) => x.conversationId === pending); setOpen(c || { conversationId: pending, title: "Chat" }); } }).catch((e) => setError(e.message)); }, [v]);
   useEffect(() => { let c; live().then((x) => { c = x; x.on("message", () => setV((n) => n + 1)); }).catch(() => {}); return () => c?.off("message"); }, []);
@@ -81,12 +104,12 @@ export default function Chat({ user }) {
   return (
     <section className="chat-page stack">
       <div className="section-heading"><div><span className="overline">PLAYERS · HOSTS · CLUBS</span><h1>Chat</h1></div></div>
-      <div className="segmented" role="tablist"><button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "active" : ""} onClick={() => setTab("chats")}>Chats</button><button role="tab" aria-selected={tab === "friends"} className={tab === "friends" ? "active" : ""} onClick={() => setTab("friends")}>Friends</button></div>
+      <div className="segmented tabs-scroll" role="tablist"><button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "active" : ""} onClick={() => setTab("chats")}>Chats</button><button role="tab" aria-selected={tab === "groups"} className={tab === "groups" ? "active" : ""} onClick={() => setTab("groups")}>Groups</button><button role="tab" aria-selected={tab === "friends"} className={tab === "friends" ? "active" : ""} onClick={() => setTab("friends")}>Friends</button><button role="tab" aria-selected={tab === "shots"} className={tab === "shots" ? "active" : ""} onClick={() => setTab("shots")}>Shots</button></div>
       {error && <p className="alert" role="alert">{error}</p>}
-      {tab === "friends" ? <Friends onOpen={openWith} /> : !list ? <p className="muted">Loading…</p> : list.length === 0 ? (
+      {tab === "shots" ? <Shots user={user} lookups={lookups} /> : tab === "groups" ? <Groups onOpen={(c) => setOpen(c)} /> : tab === "friends" ? <Friends onOpen={openWith} /> : !list ? <p className="muted">Loading…</p> : list.length === 0 ? (
         <div className="panel"><h2>No chats yet</h2><p className="muted">Every game you join has a group chat. Message clubs from their court page, and friends from the Friends tab.</p></div>
       ) : <ul className="chat-list">{list.map((c) => <li key={c.conversationId}><button onClick={() => setOpen(c)}>
-          <span className="chat-kind">{c.kind === "Game" ? "🏆" : c.kind === "Club" ? "🏟️" : "💬"}</span>
+          <span className="chat-kind">{c.kind === "Game" ? "🏆" : c.kind === "Club" ? "🏟️" : c.kind === "Group" ? "👥" : "💬"}</span>
           <span className="chat-main"><strong>{c.title}</strong><small>{c.lastMessage || "No messages yet"}</small></span>
           {c.unread > 0 && <span className="badge" aria-label={`${c.unread} unread`}>{c.unread}</span>}
         </button></li>)}</ul>}

@@ -12,3 +12,6 @@ tests/**/obj/
 .vs/
 *.user
 *.suo
+
+# Uploaded user photos (Shots) are data, never source code
+backend/App_Data/

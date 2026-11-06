@@ -89,9 +89,25 @@ function OperatorQueue() {
   );
 }
 
-function Decision({ title, detail, path, options, needsReference, done }) {
+function ClubPayouts() {
+  const [list, setList] = useState(null), [v, setV] = useState(0), [error, setError] = useState("");
+  useEffect(() => { api("/operator/club-balances").then(setList).catch(() => setList([])); }, [v]);
+  if (!list || !list.length) return null;
+  return (
+    <section className="stack">
+      <h2>Operator: club payouts</h2>
+      <p className="payment-note">Money players paid in-app for courts, memberships and packs belongs to the clubs. Send it from GameOn's Whish/bank, then record the reference.</p>
+      {list.map((c) => <Decision key={c.clubId} title={`${c.name} · holds ${money(c.balance)}`} detail={`Club phone ${c.contactPhoneNumber || "not set"}${c.lastPayout ? ` · last payout ${new Date(c.lastPayout + "Z").toLocaleDateString()}` : ""}`}
+        path={`/operator/clubs/${c.clubId}/payouts`} options={[["SENT", `I sent ${money(c.balance)}`]]} needsReference
+        transform={(b) => ({ amount: Number(c.balance), reference: b.reference })} done={() => setV((x) => x + 1)} />)}
+      {error && <p className="alert">{error}</p>}
+    </section>
+  );
+}
+
+function Decision({ title, detail, path, options, needsReference, done, transform }) {
   const [decision, setDecision] = useState(options[0][0]), [note, setNote] = useState(""), [reference, setReference] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  async function submit(e) { e.preventDefault(); setBusy(true); setError(""); try { await api(path, "POST", { decision, note, reference: reference || null }); done(); } catch (err) { setError(err.message); } finally { setBusy(false); } }
+  async function submit(e) { e.preventDefault(); setBusy(true); setError(""); try { const body = { decision, note, reference: reference || null }; await api(path, "POST", transform ? transform(body) : body); done(); } catch (err) { setError(err.message); } finally { setBusy(false); } }
   return (
     <form className="panel stack" onSubmit={submit}>
       <h3>{title}</h3><p>{detail}</p>
@@ -143,6 +159,7 @@ export default function Wallet({ config }) {
         )}
       </section>
       {s.canReview && <OperatorQueue />}
+      {s.canReview && <ClubPayouts />}
       <p className="muted small">GameOn's Whish number receives top-ups; balances are recorded in GameOn's ledger. Wallet limit USD 500.</p>
     </section>
   );

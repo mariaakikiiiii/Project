@@ -28,6 +28,11 @@ MIGRATIONS = {
              guard=""" IF OBJECT_ID(N'dbo.WalletLedger',N'U') IS NULL OR OBJECT_ID(N'dbo.EventAttendance',N'U') IS NULL
   THROW 50002,'Migrations 22 and 25 must be installed first.',1;
 """),
+    29: dict(name='29-club-suite', prior=27,
+             title='wallet court payments, booking approval, memberships & class packs with QR check-in, class attendance, groups, CRM, inventory, payroll, club payouts, Shots.',
+             guard=""" IF OBJECT_ID(N'dbo.Clubs',N'U') IS NULL OR OBJECT_ID(N'dbo.CourtBookings',N'U') IS NULL
+  THROW 50002,'Migration 27 must be installed first.',1;
+"""),
 }
 
 

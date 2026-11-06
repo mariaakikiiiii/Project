@@ -55,7 +55,7 @@ public static class CommunityEndpoints
             if (i.IdempotencyKey == Guid.Empty || i.RewardCode is { Length: not 10 } || i.GuestName?.Length > 80) return Bad("Refresh and try again.");
             var r = (await db.Call("dbo.BookCourt", ct, P("@CourtId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, Id(u)),
                 P("@StartsAtUtc", SqlDbType.DateTime2, i.StartsAtUtc.UtcDateTime), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey),
-                P("@RedemptionCode", SqlDbType.Char, i.RewardCode?.ToUpperInvariant(), 10), P("@GuestName", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(i.GuestName) ? null : i.GuestName.Trim(), 80)))[0][0];
+                P("@RedemptionCode", SqlDbType.Char, i.RewardCode?.ToUpperInvariant(), 10), P("@GuestName", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(i.GuestName) ? null : i.GuestName.Trim(), 80), P("@PayFromWallet", SqlDbType.Bit, i.PayFromWallet)))[0][0];
             return Results.Ok(r);
         }).RequireAuthorization().RequireRateLimiting("checkout");
 
@@ -239,7 +239,7 @@ public static class CommunityEndpoints
         (await db.Call("dbo.ListPrivateGamesHidden", ct, P("@UserId", SqlDbType.Int, userId)))[0].Select(r => Convert.ToInt32(r["gameId"])).ToHashSet();
 }
 
-public sealed record CourtBookingInput(DateTimeOffset StartsAtUtc, Guid IdempotencyKey, string? RewardCode = null, string? GuestName = null);
+public sealed record CourtBookingInput(DateTimeOffset StartsAtUtc, Guid IdempotencyKey, string? RewardCode = null, string? GuestName = null, bool PayFromWallet = false);
 public sealed record ClassRegistrationInput(bool Cancel = false);
 public sealed record NewClubInput(int VenueId, string Name, string OwnerEmail, bool IsPartner = false, byte ProDiscountPct = 0);
 public sealed record StaffInput(string Email, string? Role);
