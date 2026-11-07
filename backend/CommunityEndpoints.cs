@@ -208,10 +208,10 @@ public static class CommunityEndpoints
         }).RequireAuthorization().RequireRateLimiting("checkout");
 
         // ---------- Loyalty, rewards, GameOn Pro ----------
-        app.MapGet("/api/me/rewards", async (ClaimsPrincipal u, Database db, IConfiguration config, CancellationToken ct) =>
+        app.MapGet("/api/me/rewards", async (ClaimsPrincipal u, Database db, PlatformSettings settings, CancellationToken ct) =>
         {
             var s = await db.Call("dbo.GetRewards", ct, P("@UserId", SqlDbType.Int, Id(u)));
-            return Results.Ok(new { summary = s[0][0], rewards = s[1], history = s[2], codes = s[3], pro = new { price = ProPrice(config), days = 30 } });
+            return Results.Ok(new { summary = s[0][0], rewards = s[1], history = s[2], codes = s[3], pro = new { price = await settings.ProPrice(ct), days = 30 } });
         }).RequireAuthorization();
 
         app.MapPost("/api/me/rewards/{id:int}/redeem", async (int id, KeyInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
@@ -219,10 +219,10 @@ public static class CommunityEndpoints
             Results.Ok((await db.Call("dbo.RedeemReward", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@RewardId", SqlDbType.Int, id), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey)))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
-        app.MapPost("/api/me/pro", async (KeyInput i, ClaimsPrincipal u, Database db, IConfiguration config, CancellationToken ct) =>
+        app.MapPost("/api/me/pro", async (KeyInput i, ClaimsPrincipal u, Database db, PlatformSettings settings, CancellationToken ct) =>
             i.IdempotencyKey == Guid.Empty ? Bad("Refresh and try again.") :
             Results.Ok((await db.Call("dbo.BuyPro", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey),
-                Dec("@Price", ProPrice(config)), P("@Days", SqlDbType.Int, 30)))[0][0]))
+                Dec("@Price", await settings.ProPrice(ct)), P("@Days", SqlDbType.Int, 30)))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
         app.MapPost("/api/badges", async (BadgeInput i, Database db, CancellationToken ct) =>

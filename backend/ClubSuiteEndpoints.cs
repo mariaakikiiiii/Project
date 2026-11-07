@@ -125,8 +125,9 @@ public static class ClubSuiteEndpoints
         app.MapGet("/api/shots", async (long? beforeId, int? subtypeId, ClaimsPrincipal u, Database db, CancellationToken ct) =>
             Results.Ok((await db.Call("dbo.ListShots", ct, P("@UserId", SqlDbType.Int, MaybeId(u)), P("@BeforeId", SqlDbType.BigInt, beforeId), P("@SubtypeId", SqlDbType.Int, subtypeId)))[0]))
             .RequireRateLimiting("browse");
-        app.MapPost("/api/shots", async (HttpRequest req, ClaimsPrincipal u, Database db, IWebHostEnvironment env, IConfiguration config, CancellationToken ct) =>
+        app.MapPost("/api/shots", async (HttpRequest req, ClaimsPrincipal u, Database db, IWebHostEnvironment env, IConfiguration config, PlatformSettings settings, CancellationToken ct) =>
         {
+            if (!await settings.Flag("ShotsEnabled", ct)) return Results.Json(new { error = "Sharing shots is paused right now." }, statusCode: 503);
             if (!req.HasFormContentType) return Bad("Choose a photo to share.");
             var form = await req.ReadFormAsync(ct);
             var file = form.Files.GetFile("photo");

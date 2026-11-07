@@ -12,11 +12,15 @@ public static class PlatformEndpoints
     private static int Id(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
     public static void MapPlatform(this WebApplication app)
     {
-        app.MapGet("/api/config", (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish, GameOn.Payments.MockPaymentSecurity mock) => Results.Ok(new
+        app.MapGet("/api/config", async (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish, GameOn.Payments.MockPaymentSecurity mock, PlatformSettings settings, CancellationToken ct) => Results.Ok(new
         {
             mapsEmbedApiKey = config["Maps:EmbedApiKey"] ?? "",
             mapsBrowserApiKey = config["Maps:BrowserApiKey"] ?? "",
             mapsMapId = config["Maps:MapId"] ?? "",
+            announcement = (await settings.All(ct)).GetValueOrDefault("Announcement", ""),
+            supportEmail = (await settings.All(ct)).GetValueOrDefault("SupportEmail", ""),
+            signupsOpen = await settings.Flag("SignupsOpen", ct),
+            shotsEnabled = await settings.Flag("ShotsEnabled", ct),
             mapsPickerAvailable = true,
             mapProvider = string.IsNullOrWhiteSpace(config["Maps:BrowserApiKey"]) ? "osm" : "google",
             walletAvailable = config.GetValue<bool>("Payments:ManualWhishEnabled"),

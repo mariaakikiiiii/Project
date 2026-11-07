@@ -33,6 +33,10 @@ MIGRATIONS = {
              guard=""" IF OBJECT_ID(N'dbo.Clubs',N'U') IS NULL OR OBJECT_ID(N'dbo.CourtBookings',N'U') IS NULL
   THROW 50002,'Migration 27 must be installed first.',1;
 """),
+    31: dict(name='31-admin', prior=29,
+             title='platform admins: users (suspend/restore/delete with anonymisation), roles, app settings, moderation, audit log, session stamps.',
+             guard=""" IF OBJECT_ID(N'dbo.Shots',N'U') IS NULL THROW 50002,'Migration 29 must be installed first.',1;
+"""),
 }
 
 

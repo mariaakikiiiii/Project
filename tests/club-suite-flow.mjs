@@ -119,8 +119,9 @@ check("Hidden GPS/EXIF data removed from the stored photo", !stored.includes(Buf
 const fake = new FormData(); fake.append("photo", new Blob(["<html><script>alert(1)</script>".repeat(10)], { type: "image/jpeg" }), "x.jpg");
 check("Non-image disguised as JPEG refused", (await p1.raw("/api/shots", "POST", fake)).status === 400);
 const big = new FormData(); big.append("photo", new Blob([Buffer.concat([jpeg.subarray(0, 2), Buffer.alloc(3.2 * 1024 * 1024)])], { type: "image/jpeg" }), "big.jpg");
-const bigR = await p1.raw("/api/shots", "POST", big);
-check("Photos over 3 MB refused", bigR.status === 400 || bigR.status === 413, String(bigR.status));
+// The server may answer 413/400 or simply close the connection while the oversized body is still uploading: both mean refused.
+let bigStatus; try { bigStatus = (await p1.raw("/api/shots", "POST", big)).status; } catch (e) { bigStatus = "closed:" + (e.cause?.code || e.message); }
+check("Photos over 3 MB refused", bigStatus === 400 || bigStatus === 413 || String(bigStatus).startsWith("closed:"), String(bigStatus));
 check("Like counts once", (await p2.json(`/api/shots/${upBody.shotId}/action`, "POST", { action: "Like" })).body?.likes === 1 && (await p2.json(`/api/shots/${upBody.shotId}/action`, "POST", { action: "Like" })).body?.likes === 1);
 check("Others cannot delete it", (await p2.json(`/api/shots/${upBody.shotId}/action`, "POST", { action: "Delete" })).status === 403);
 check("Feed shows the shot to guests", (await (await fetch(`${BASE}/api/shots`)).json()).some((s) => s.shotId === upBody.shotId));

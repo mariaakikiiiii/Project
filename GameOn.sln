@@ -47,9 +47,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{3E
 
 		database\27-clubs-community.sql = database\27-clubs-community.sql
 
-		database\28-clubs-community-tests.sql = database\28-clubs-community-tests.sql
-		database\29-club-suite.sql = database\29-club-suite.sql
-		database\30-club-suite-tests.sql = database\30-club-suite-tests.sql
+		database\28-clubs-community-tests.sql = database\28-clubs-community-tests.sql
+
+		database\29-club-suite.sql = database\29-club-suite.sql
+
+		database\30-club-suite-tests.sql = database\30-club-suite-tests.sql
+		database\31-admin.sql = database\31-admin.sql
+		database\32-admin-tests.sql = database\32-admin-tests.sql
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Frontend", "{A84E09AF-B36B-5094-B1F1-2EC930A27B35}"
@@ -90,10 +94,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "React Frontend", "React Fro
 
 		frontend\src\components\AccountHub.jsx = frontend\src\components\AccountHub.jsx
 
-		frontend\src\components\community.jsx = frontend\src\components\community.jsx
-		frontend\src\components\ClubSuite.jsx = frontend\src\components\ClubSuite.jsx
-		frontend\src\components\Passes.jsx = frontend\src\components\Passes.jsx
-		frontend\src\components\Shots.jsx = frontend\src\components\Shots.jsx
+		frontend\src\components\community.jsx = frontend\src\components\community.jsx
+
+		frontend\src\components\ClubSuite.jsx = frontend\src\components\ClubSuite.jsx
+
+		frontend\src\components\Passes.jsx = frontend\src\components\Passes.jsx
+
+		frontend\src\components\Shots.jsx = frontend\src\components\Shots.jsx
+		frontend\src\components\Admin.jsx = frontend\src\components\Admin.jsx
 		frontend\src\components\ManualWhish.jsx = frontend\src\components\ManualWhish.jsx
 		frontend\src\components\PaymentHistory.jsx = frontend\src\components\PaymentHistory.jsx
 		frontend\src\components\DepositCheckout.jsx = frontend\src\components\DepositCheckout.jsx
@@ -119,8 +127,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Guides", "Guides", "{DB2CD8
 
 		docs\UPDATE-25.md = docs\UPDATE-25.md
 
-		docs\UPDATE-27.md = docs\UPDATE-27.md
-		docs\UPDATE-29.md = docs\UPDATE-29.md
+		docs\UPDATE-27.md = docs\UPDATE-27.md
+
+		docs\UPDATE-29.md = docs\UPDATE-29.md
+		docs\ADMIN.md = docs\ADMIN.md
 		docs\REPAIR-16.md = docs\REPAIR-16.md
 	EndProjectSection
 EndProject

@@ -697,3 +697,8 @@ h1,h2 { letter-spacing: -.035em; }
 /* Google map that follows the venue search */
 .venue-embed { width: 100%; height: clamp(320px, 55vh, 560px); border: 2px solid var(--green, #22c55e); border-radius: 20px; display: block; background: var(--surface); }
 .empty-coaches { display: grid; gap: 10px; }
+
+/* Admin */
+.announcement { padding: 10px 16px; text-align: center; font-weight: 700; color: #111; background: linear-gradient(135deg, #ff6b00, #facc15); }
+.admin-users li { align-items: flex-start; flex-wrap: wrap; }
+.admin-users li > span:first-child { flex: 1 1 320px; }

@@ -33,6 +33,7 @@ import Rewards from "./components/Rewards";
 import GameAccess from "./components/GameAccess";
 import AccountHub from "./components/AccountHub";
 import Passes from "./components/Passes";
+import Admin from "./components/Admin";
 
 function Mark({ name }) {
   const paths = {
@@ -1392,6 +1393,7 @@ function App() {
             ))}
         </div>
       </header>
+      {config?.announcement && <div className="announcement" role="status">{config.announcement}</div>}
       <main id="main" tabIndex={-1}>
         <Alert>{error}</Alert>
         {!authReady ? (
@@ -1456,8 +1458,9 @@ function App() {
             {page === "payments" && user && <Payments config={config} user={user} />}
             {page === "wallet" && user && <Wallet config={config} />}
             {page === "courts" && <Courts lookups={lookups} user={user} />}
-            {page === "chat" && user && <Chat user={user} lookups={lookups} />}
+            {page === "chat" && user && <Chat user={user} lookups={lookups} shotsEnabled={config?.shotsEnabled !== false} />}
             {page === "passes" && user && <Passes />}
+            {page === "admin" && user && <Admin user={user} />}
             {page === "rewards" && user && <Rewards />}
             {page === "club" && user && <ClubManager lookups={lookups} />}
             {["auth","signup"].includes(page) && (

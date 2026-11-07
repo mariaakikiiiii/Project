@@ -13,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<MapsLocations>();
+builder.Services.AddSingleton<PlatformSettings>();
 builder.Services.AddHttpClient("maps", c => c.Timeout = TimeSpan.FromSeconds(12)).RemoveAllLoggers();
 builder.Services.AddMemoryCache();
 // OpenStreetMap Nominatim requires an identifying User-Agent (https://operations.osmfoundation.org/policies/nominatim/).
@@ -43,7 +44,8 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         { ctx.RejectPrincipal(); return; }
         var db = ctx.HttpContext.RequestServices.GetRequiredService<Database>();
         var rows = (await db.Call("dbo.CheckSession", ctx.HttpContext.RequestAborted, P("@UserId", SqlDbType.Int, id)))[0];
-        if (rows.Count == 0 || Convert.ToInt32(rows[0]["securityVersion"]) != version) ctx.RejectPrincipal();
+        if (rows.Count == 0 || Convert.ToInt32(rows[0]["securityVersion"]) != version
+            || ctx.Principal?.FindFirstValue("stamp") != rows[0]["sessionStamp"]?.ToString()) ctx.RejectPrincipal();
     };
     o.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = 401; return Task.CompletedTask; };
     o.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = 403; return Task.CompletedTask; };
@@ -124,8 +126,9 @@ app.Use(async (ctx, next) =>
 });
 app.MapGet("/api/csrf", (HttpContext c, IAntiforgery anti) =>
     Results.Ok(new { token = anti.GetAndStoreTokens(c).RequestToken }));
-app.MapPost("/api/auth/register", async (Register input, HttpContext ctx, Database db, IPasswordHasher<string> hasher, CancellationToken ct) =>
+app.MapPost("/api/auth/register", async (Register input, HttpContext ctx, Database db, IPasswordHasher<string> hasher, PlatformSettings settings, CancellationToken ct) =>
 {
+    if (!await settings.Flag("SignupsOpen", ct)) return Results.Json(new { error = "New sign-ups are paused right now. Please try again later." }, statusCode: 503);
     if (!ValidEmail(input.Email) || string.IsNullOrWhiteSpace(input.DisplayName) || input.DisplayName.Length > 80
         || input.Password is null || input.Password.Length < 12 || input.Password.Length > 128)
         return Results.BadRequest(new { error = "Use a valid email, name (1–80 characters), and password (12–128 characters)." });
@@ -139,7 +142,8 @@ app.MapPost("/api/auth/register", async (Register input, HttpContext ctx, Databa
         P("@SportsJson",SqlDbType.NVarChar,System.Text.Json.JsonSerializer.Serialize(input.SportIds),2000)))[0][0];
     var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] {
         new Claim(ClaimTypes.NameIdentifier,registered["userId"]!.ToString()!),new Claim(ClaimTypes.Name,registered["displayName"]!.ToString()!),
-        new Claim("securityVersion",registered["securityVersion"]!.ToString()!)
+        new Claim("securityVersion",registered["securityVersion"]!.ToString()!),
+        new Claim("stamp",(await db.Call("dbo.CheckSession", ct, P("@UserId", SqlDbType.Int, Convert.ToInt32(registered["userId"]))))[0][0]["sessionStamp"]!.ToString()!)
     },CookieAuthenticationDefaults.AuthenticationScheme));
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,principal);
     return Results.Ok(new { message = "Your account is ready." });
@@ -158,10 +162,14 @@ app.MapPost("/api/auth/login", async (Login input, HttpContext ctx, Database db,
     var result = hasher.VerifyHashedPassword(email, hash, input.Password);
     if (row is null || row["passwordHash"]?.ToString() == "DISABLED_FIXTURE" || result == PasswordVerificationResult.Failed)
         return Results.Json(new { error = "Invalid credentials." }, statusCode: 401);
+    if (row["accountStatus"]?.ToString() != "Active")
+        return Results.Json(new { error = "This account is suspended. Contact GameOn support if you think this is a mistake." }, statusCode: 403);
+    await db.Call("dbo.RecordLogin", ct, P("@UserId", SqlDbType.Int, Convert.ToInt32(row["userId"])));
     var identity = new ClaimsIdentity(new[] {
         new Claim(ClaimTypes.NameIdentifier, row["userId"]!.ToString()!),
         new Claim(ClaimTypes.Name, row["displayName"]!.ToString()!),
-        new Claim("securityVersion", row["securityVersion"]!.ToString()!)
+        new Claim("securityVersion", row["securityVersion"]!.ToString()!),
+        new Claim("stamp", row["sessionStamp"]!.ToString()!)
     }, CookieAuthenticationDefaults.AuthenticationScheme);
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
     return Results.Ok(new { name = row["displayName"] });
@@ -170,7 +178,7 @@ app.MapPost("/api/auth/logout", async (HttpContext ctx) => { await ctx.SignOutAs
 app.MapGet("/api/auth/me", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
     var profile = (await db.Call("dbo.GetProfile", ct, P("@UserId", SqlDbType.Int, UserId(u))))[0][0];
-    return Results.Ok(new { name = profile["displayName"], userId = UserId(u), canManageVenues=profile["canManageVenues"] });
+    return Results.Ok(new { name = profile["displayName"], userId = UserId(u), canManageVenues=profile["canManageVenues"], isAdmin=profile["isAdmin"] });
 }).RequireAuthorization();
 app.MapGet("/api/lookups", async (Database db, CancellationToken ct) =>
 {
@@ -251,6 +259,7 @@ app.MapAttendance();
 app.MapWallet();
 app.MapCommunity();
 app.MapClubSuite();
+app.MapAdmin();
 app.Run();
 static int UserId(ClaimsPrincipal u) => int.Parse(u.FindFirstValue(ClaimTypes.NameIdentifier)!);
 static bool ValidEmail(string? email) => email is not null && email.Length <= 254

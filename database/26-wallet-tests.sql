@@ -66,7 +66,7 @@ INSERT @t SELECT 'Rejected withdrawal returns the money',CASE WHEN (SELECT Balan
 SET @k=NEWID(); INSERT @sink(a,b,c,d) EXEC dbo.RequestWithdrawal @UserId=@P,@Key=@k,@Amount=5,@WhishNumber='+96171123456'; SELECT @W=CONVERT(uniqueidentifier,a) FROM @sink; DELETE @sink;
 SET @ok=0; BEGIN TRY EXEC dbo.ReviewWithdrawal @OperatorId=@O,@WithdrawalId=@W,@Decision='SENT',@Note=N'sent'; END TRY BEGIN CATCH SET @ok=1; END CATCH;
 INSERT @t VALUES('Sent withdrawal requires the Whish reference',@ok);
-EXEC dbo.ReviewWithdrawal @OperatorId=@O,@WithdrawalId=@W,@Decision='SENT',@Reference=N'OUT-1',@Note=N'Sent from GameOn Whish';
+EXEC dbo.ReviewWithdrawal @OperatorId=@O,@WithdrawalId=@W,@Decision='SENT',@Reference=@ref2,@Note=N'Sent from GameOn Whish';
 INSERT @t SELECT 'Sent withdrawal empties wallet',CASE WHEN (SELECT Balance FROM dbo.WalletAccounts WHERE UserId=@P)=0 AND (SELECT Status FROM dbo.WalletWithdrawals WHERE WithdrawalId=@W)='Sent' THEN 1 ELSE 0 END;
 -- Ledger integrity: cached balance always equals the sum of ledger entries.
 INSERT @t SELECT 'Every balance equals its ledger sum',CASE WHEN NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts a WHERE a.Balance<>(SELECT COALESCE(SUM(Amount),0) FROM dbo.WalletLedger l WHERE l.UserId=a.UserId)) THEN 1 ELSE 0 END;

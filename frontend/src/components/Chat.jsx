@@ -95,7 +95,7 @@ function Thread({ conv, me, onBack }) {
   );
 }
 
-export default function Chat({ user, lookups }) {
+export default function Chat({ user, lookups, shotsEnabled = true }) {
   const [tab, setTab] = useState("chats"), [list, setList] = useState(null), [open, setOpen] = useState(null), [v, setV] = useState(0), [error, setError] = useState("");
   useEffect(() => { api("/chats").then((l) => { setList(l); const pending = takePendingChat(); if (pending) { const c = l.find((x) => x.conversationId === pending); setOpen(c || { conversationId: pending, title: "Chat" }); } }).catch((e) => setError(e.message)); }, [v]);
   useEffect(() => { let c; live().then((x) => { c = x; x.on("message", () => setV((n) => n + 1)); }).catch(() => {}); return () => c?.off("message"); }, []);
@@ -104,7 +104,7 @@ export default function Chat({ user, lookups }) {
   return (
     <section className="chat-page stack">
       <div className="section-heading"><div><span className="overline">PLAYERS · HOSTS · CLUBS</span><h1>Chat</h1></div></div>
-      <div className="segmented tabs-scroll" role="tablist"><button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "active" : ""} onClick={() => setTab("chats")}>Chats</button><button role="tab" aria-selected={tab === "groups"} className={tab === "groups" ? "active" : ""} onClick={() => setTab("groups")}>Groups</button><button role="tab" aria-selected={tab === "friends"} className={tab === "friends" ? "active" : ""} onClick={() => setTab("friends")}>Friends</button><button role="tab" aria-selected={tab === "shots"} className={tab === "shots" ? "active" : ""} onClick={() => setTab("shots")}>Shots</button></div>
+      <div className="segmented tabs-scroll" role="tablist"><button role="tab" aria-selected={tab === "chats"} className={tab === "chats" ? "active" : ""} onClick={() => setTab("chats")}>Chats</button><button role="tab" aria-selected={tab === "groups"} className={tab === "groups" ? "active" : ""} onClick={() => setTab("groups")}>Groups</button><button role="tab" aria-selected={tab === "friends"} className={tab === "friends" ? "active" : ""} onClick={() => setTab("friends")}>Friends</button>{shotsEnabled && <button role="tab" aria-selected={tab === "shots"} className={tab === "shots" ? "active" : ""} onClick={() => setTab("shots")}>Shots</button>}</div>
       {error && <p className="alert" role="alert">{error}</p>}
       {tab === "shots" ? <Shots user={user} lookups={lookups} /> : tab === "groups" ? <Groups onOpen={(c) => setOpen(c)} /> : tab === "friends" ? <Friends onOpen={openWith} /> : !list ? <p className="muted">Loading…</p> : list.length === 0 ? (
         <div className="panel"><h2>No chats yet</h2><p className="muted">Every game you join has a group chat. Message clubs from their court page, and friends from the Friends tab.</p></div>
