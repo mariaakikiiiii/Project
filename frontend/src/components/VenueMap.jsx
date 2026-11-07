@@ -17,6 +17,18 @@ function loadMaps(key) {
 function venueTerm(type) {
   return ({ Basketball: "basketball court rental", "Football (Soccer)": "football pitch rental", Padel: "padel courts", Tennis: "tennis courts", Volleyball: "volleyball courts", Badminton: "badminton courts", "Table Tennis (Ping Pong)": "table tennis clubs", Squash: "squash courts", Swimming: "swimming pools", Paintball: "paintball fields", "Laser Tag": "laser tag arenas", "iCombat / Tactical Laser Tag": "tactical laser tag", "Escape Rooms": "escape rooms", "Go-Karting": "go kart tracks", Bowling: "bowling alleys", "Archery Tag": "archery tag", Airsoft: "airsoft fields" })[type] || "sports and activity venues";
 }
+// A Google Map that shows what the user searched for. With Maps:EmbedApiKey it uses Google's official
+// (free) Maps Embed API; without a key it uses Google's public map embed so the map still works.
+export function GoogleSearchMap({ query, config = {}, title }) {
+  const q = encodeURIComponent(query);
+  const coords = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(query);
+  const src = config.mapsEmbedApiKey
+    ? `https://www.google.com/maps/embed/v1/${coords ? "place" : "search"}?key=${encodeURIComponent(config.mapsEmbedApiKey)}&q=${q}&region=LB`
+    // Google's public embed page (no redirect, so no "same-origin only" header is hit on the way).
+    : `https://www.google.com/maps/embed?origin=mfe&pb=!1m3!2m1!1s${q.replace(/%20/g, "+").replace(/!/g, "%21")}!6i${coords ? 16 : 12}`;
+  return <iframe className="venue-embed" title={title || `Google Map: ${query}`} src={src} loading="lazy" referrerPolicy="no-referrer-when-downgrade" allowFullScreen />;
+}
+
 export function googleVenueSearch(type, area = "") {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${venueTerm(type)} ${area} Lebanon`)}`;
 }
@@ -26,6 +38,7 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
   const [selectedPlace,setSelectedPlace] = useState(null),[notice,setNotice] = useState("");
   const selection = useRef(onSelect);
   selection.current = onSelect;
+  const [embedQuery, setEmbedQuery] = useState(null);
   const [area, setArea] = useState(""), [places, setPlaces] = useState([]), [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
   useEffect(() => {
     alive.current = true;
@@ -47,7 +60,7 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
     }).catch(e => { if (alive.current) setError(e.message); });
     return () => { alive.current = false; request.current++; listener?.remove(); markers.current.forEach(m => { m.map = null; }); };
   }, [config.mapsBrowserApiKey, config.mapsMapId]);
-  useEffect(() => {request.current++;setPlaces([]);setSelectedPlace(null);setBusy(false);markers.current.forEach(m=>{m.map=null;});markers.current=[];}, [type,subtypeId]);
+  useEffect(() => {request.current++;setPlaces([]);setSelectedPlace(null);setEmbedQuery(null);setBusy(false);markers.current.forEach(m=>{m.map=null;});markers.current=[];}, [type,subtypeId]);
   async function search() {
     const sequence=++request.current;setBusy(true);setError("");setNotice("");setSelectedPlace(null);
     const local=api(`/venues/search?${new URLSearchParams({q:area,...(subtypeId?{subtypeId:String(subtypeId)}:{})})}`).then(rows=>rows.map(v=>({
@@ -64,7 +77,7 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
     const results=await Promise.allSettled([local,google]);
     if(!alive.current||sequence!==request.current)return;
     const found=results.flatMap(r=>r.status==="fulfilled"?r.value:[]);
-    setPlaces(found);setBusy(false);
+    setPlaces(found);setBusy(false);setEmbedQuery(`${venueTerm(type)} ${area} Lebanon`.replace(/\s+/g," ").trim());
     if(results[0].status==="rejected")setNotice("GameOn directory is temporarily unavailable.");
     if(results[1].status==="rejected")setNotice("Live map listings are temporarily unavailable. Directory results are shown below.");
     if(!config.mapsBrowserApiKey&&results[0].status==="fulfilled")setNotice("Showing the GameOn directory. More locations appear as venues are added.");
@@ -81,6 +94,7 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
   }
   function choose(place) {
     setSelectedPlace(place);
+    setEmbedQuery(place.location ? `${place.location.lat()},${place.location.lng()}` : [place.displayName, place.area, "Lebanon"].filter(Boolean).join(", "));
     if(place.venueId) selection.current?.({venueId:place.venueId,name:place.displayName,area:place.area,address:place.formattedAddress});
     else if(selection.current&&config.mapsPickerAvailable) selection.current({name:place.displayName,latitude:place.location.lat(),longitude:place.location.lng(),placeId:place.id});
     if(place.location&&map.current){map.current.setCenter(place.location);map.current.setZoom(15);}
@@ -89,6 +103,8 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
     <div className="venue-search-row"><label>Town or neighborhood<input value={area} maxLength={100} placeholder="Search Jounieh, Beirut, Tripoli…" onChange={e=>setArea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();if(!busy)search();}}}/></label><button type="button" className="primary" disabled={busy} onClick={search}>{busy?"Searching…":"Search venues"}</button></div>
     <p className="muted">Find {type||"sports and activity venues"} inside GameOn. Call the operator to confirm rental availability; joining a game does not reserve the court.</p>
     {config.mapsBrowserApiKey&&<div className="interactive-map" ref={canvas} aria-label="Google Map of Lebanon"/>}
+    {!config.mapsBrowserApiKey&&<GoogleSearchMap config={config} query={embedQuery || `${venueTerm(type)} Lebanon`} title={selectedPlace ? `Map of ${selectedPlace.displayName}` : `Google Map of ${venueTerm(type)} in Lebanon`}/>}
+    {!config.mapsBrowserApiKey&&<p className="muted small">The map shows Google results for your search. Click a result below to zoom to it. <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(embedQuery || `${venueTerm(type)} Lebanon`)}`} target="_blank" rel="noopener noreferrer">Open in Google Maps ↗</a></p>}
     {config.mapsPickerAvailable&&onSelect&&<p className="muted">Choose a listed venue, or click the map for your own meeting point.</p>}
     <div aria-live="polite" aria-busy={busy}>
       {notice&&<p className="payment-note">{notice}</p>}

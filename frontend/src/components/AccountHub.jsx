@@ -25,7 +25,7 @@ function CoachProfile({ lookups }) {
 }
 
 export default function AccountHub({ user, lookups, unread, navigate, children }) {
-  const [wallet, setWallet] = useState(null), [rewards, setRewards] = useState(null), [clubs, setClubs] = useState([]), [coach, setCoach] = useState(false);
+  const [wallet, setWallet] = useState(null), [rewards, setRewards] = useState(null), [clubs, setClubs] = useState([]), [coach, setCoach] = useState(() => { try { const v = sessionStorage.getItem("gameon.openCoach") === "1"; sessionStorage.removeItem("gameon.openCoach"); return v; } catch { return false; } });
   useEffect(() => {
     api("/me/wallet").then((w) => setWallet(w.summary)).catch(() => {});
     api("/me/rewards").then((r) => setRewards(r.summary)).catch(() => {});

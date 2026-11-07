@@ -693,3 +693,7 @@ h1,h2 { letter-spacing: -.035em; }
 .shot figcaption { padding: 12px 14px; display: grid; gap: 6px; }
 .shot figcaption p { margin: 0; overflow-wrap: anywhere; }
 .shot-preview { max-width: 240px; border-radius: 14px; }
+
+/* Google map that follows the venue search */
+.venue-embed { width: 100%; height: clamp(320px, 55vh, 560px); border: 2px solid var(--green, #22c55e); border-radius: 20px; display: block; background: var(--surface); }
+.empty-coaches { display: grid; gap: 10px; }

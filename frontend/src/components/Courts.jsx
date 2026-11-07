@@ -124,7 +124,14 @@ function Coaches({ lookups }) {
   return (
     <section className="stack">
       <label>Sport<select value={sport} onChange={(e) => setSport(e.target.value)}><option value="">All sports</option>{lookups.sports.filter((s) => s.categorySlug === "sports").map((s) => <option key={s.sportId} value={s.sportId}>{s.name}</option>)}</select></label>
-      {!data ? <p className="muted">Loading coaches…</p> : data.coaches.length === 0 ? <p className="muted">No coaches listed for this sport yet. Coaches can create a profile from Me → Coach profile.</p> :
+      {!data ? <p className="muted">Loading coaches…</p> : data.coaches.length === 0 ? (
+        <div className="panel empty-coaches">
+          <h2>No coaches here yet</h2>
+          <p className="muted">GameOn only lists real coaches who create their own profile, so this list grows as coaches join. Clubs can also add their coaches as staff.</p>
+          <div className="button-row"><a className="primary" href="#/profile" onClick={() => { try { sessionStorage.setItem("gameon.openCoach", "1"); } catch { /* ignore */ } }}>I am a coach: create my profile</a>
+          <a className="secondary" href="#/venues">Find clubs and venues instead</a></div>
+          <p className="muted small">Know a good coach? Ask them to sign up and fill in Me → Coach profile.</p>
+        </div>) :
         <div className="card-grid">{data.coaches.map((c) => (
           <article className="panel coach-card" key={c.userId}>
             <h3>{c.displayName} <ProBadge show={c.isPro} /></h3><p><strong>{c.headline}</strong></p>
