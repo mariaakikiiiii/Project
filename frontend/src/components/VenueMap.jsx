@@ -72,7 +72,7 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
     const google=config.mapsBrowserApiKey?(async()=>{
       const maps=await loadMaps(config.mapsBrowserApiKey),{Place}=await maps.importLibrary("places");
       const response=await Place.searchByText({textQuery:`${venueTerm(type)} ${area} Lebanon`,fields:["id","displayName","formattedAddress","location","addressComponents","googleMapsURI"],locationRestriction:{north:34.8,south:33,east:36.7,west:35},region:"lb",maxResultCount:20});
-      return (response.places||[]).filter(p=>p.addressComponents?.some(c=>c.types.includes("country")&&c.shortText==="LB")).map(p=>({...p,id:p.id,displayName:p.displayName,formattedAddress:p.formattedAddress,location:p.location,googleMapsURI:p.googleMapsURI,source:"Google listing"}));
+      return (response.places||[]).filter(p=>p.addressComponents?.some(c=>c.types.includes("country")&&c.shortText==="LB")).map(p=>({raw:p,id:p.id,displayName:p.displayName,formattedAddress:p.formattedAddress,location:p.location,googleMapsURI:p.googleMapsURI,source:"Google listing"}));
     })():Promise.resolve([]);
     const results=await Promise.allSettled([local,google]);
     if(!alive.current||sequence!==request.current)return;
@@ -92,8 +92,18 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
      } catch { if(alive.current&&sequence===request.current)setNotice("Map markers could not load. You can still select a venue below."); }
     }
   }
+  async function googleDetails(place){
+    // Phone, website and opening hours come from Google only when a player opens a place (keeps API usage low).
+    try{
+      await place.raw.fetchFields({fields:["internationalPhoneNumber","nationalPhoneNumber","websiteURI","regularOpeningHours","rating","userRatingCount"]});
+      const r=place.raw;
+      setSelectedPlace(cur=>cur?.id!==place.id?cur:{...cur,googlePhone:r.internationalPhoneNumber||r.nationalPhoneNumber||null,website:r.websiteURI||null,
+        hours:r.regularOpeningHours?.weekdayDescriptions||null,rating:r.rating??null,ratingCount:r.userRatingCount??0,detailsLoaded:true});
+    }catch{ setSelectedPlace(cur=>cur?.id!==place.id?cur:{...cur,detailsLoaded:true}); }
+  }
   function choose(place) {
     setSelectedPlace(place);
+    if(place.raw?.fetchFields&&!place.detailsLoaded) googleDetails(place);
     setEmbedQuery(place.location ? `${place.location.lat()},${place.location.lng()}` : [place.displayName, place.area, "Lebanon"].filter(Boolean).join(", "));
     if(place.venueId) selection.current?.({venueId:place.venueId,name:place.displayName,area:place.area,address:place.formattedAddress});
     else if(selection.current&&config.mapsPickerAvailable) selection.current({name:place.displayName,latitude:place.location.lat(),longitude:place.location.lng(),placeId:place.id});
@@ -112,7 +122,14 @@ export default function VenueMap({ config = {}, type, subtypeId, onSelect, value
        <div><span className="overline">{p.source}</span><strong>{p.displayName}</strong><small>{[p.area,p.formattedAddress].filter(Boolean).join(" · ")}</small>{p.isDemo?<span className="pill danger">Demo venue · not real</span>:p.listingStatus&&<span className={`pill ${p.listingStatus==="Verified"?"ok":"warn"}`}>{p.listingStatus==="Verified"?"Listing checked":"Unverified listing"}</span>}{p.activities&&<small>Sports: {p.activities}</small>}{p.source==="GameOn directory"&&!p.hasActivityDetails&&<small>Activity details not yet confirmed</small>}</div>
        <button type="button" className="secondary" onClick={()=>choose(p)}>{onSelect&&(p.venueId||config.mapsPickerAvailable)?"Choose venue":"View venue"}</button>
       </li>)}</ul>
-      {selectedPlace&&<section className="selected-venue" aria-label="Selected venue"><span className="pill">Selected venue</span><h3>{selectedPlace.displayName}</h3><p>{selectedPlace.formattedAddress}</p>{selectedPlace.source==="GameOn directory"&&<dl className="venue-facts"><div><dt>Offers your sport</dt><dd>{selectedPlace.activities||"Not yet confirmed"}</dd></div><div><dt>Reservations</dt><dd>{({ContactVenue:"Contact the venue to reserve",OnlineBooking:"Venue takes online bookings",WalkIn:"Walk-in"})[selectedPlace.reservationMode]||"Unknown. Call to ask"}</dd></div><div><dt>Live availability</dt><dd>Not shown. GameOn has no booking link with this venue.</dd></div><div><dt>Source</dt><dd>{selectedPlace.sourceUrl?<a href={selectedPlace.sourceUrl} target="_blank" rel="noopener noreferrer">{selectedPlace.sourceName||"Source"} ↗</a>:"None recorded"}{selectedPlace.sourceCheckedOn&&` · checked ${String(selectedPlace.sourceCheckedOn).slice(0,10)}`}</dd></div>{selectedPlace.contactPhoneNumber&&!selectedPlace.isVerified&&<div><dt>Phone</dt><dd>Published number, not yet confirmed by GameOn</dd></div>}</dl>}{selectedPlace.note&&<p className="muted">{selectedPlace.note}</p>}{selectedPlace.websiteUrl&&<a className="secondary" href={selectedPlace.websiteUrl} target="_blank" rel="noopener noreferrer">Venue website ↗</a>}{selectedPlace.contactPhoneNumber&&/^\+[0-9]{7,15}$/.test(selectedPlace.contactPhoneNumber)&&<a className="secondary" href={`tel:${selectedPlace.contactPhoneNumber}`}>Call venue</a>}<a className="secondary" href={selectedPlace.googleMapsURI} target="_blank" rel="noopener noreferrer">Directions in Google Maps ↗</a></section>}
+      {selectedPlace&&<section className="selected-venue" aria-label="Selected venue"><span className="pill">Selected venue</span><h3>{selectedPlace.displayName}</h3><p>{selectedPlace.formattedAddress}</p>{selectedPlace.source==="Google listing"&&<dl className="venue-facts">
+      {!selectedPlace.detailsLoaded&&<div><dt>Details</dt><dd>Loading from Google…</dd></div>}
+      {selectedPlace.googlePhone&&<div><dt>Phone</dt><dd><a href={`tel:${selectedPlace.googlePhone.replace(/[^+0-9]/g,"")}`}>{selectedPlace.googlePhone}</a></dd></div>}
+      {selectedPlace.website&&<div><dt>Website</dt><dd><a href={selectedPlace.website} target="_blank" rel="noopener noreferrer">{selectedPlace.website.replace(/^https?:\/\//,"").replace(/\/$/,"")} ↗</a></dd></div>}
+      {selectedPlace.hours&&<div><dt>Opening hours</dt><dd>{selectedPlace.hours[(new Date().getDay()+6)%7]}</dd></div>}
+      {selectedPlace.rating!=null&&<div><dt>Google rating</dt><dd>{selectedPlace.rating} ★ ({selectedPlace.ratingCount})</dd></div>}
+      <div><dt>Live availability</dt><dd>Not shown. Call the venue to book.</dd></div>
+      <div><dt>Source</dt><dd>Google Maps listing</dd></div></dl>}{selectedPlace.source==="GameOn directory"&&<dl className="venue-facts"><div><dt>Offers your sport</dt><dd>{selectedPlace.activities||"Not yet confirmed"}</dd></div><div><dt>Reservations</dt><dd>{({ContactVenue:"Contact the venue to reserve",OnlineBooking:"Venue takes online bookings",WalkIn:"Walk-in"})[selectedPlace.reservationMode]||"Unknown. Call to ask"}</dd></div><div><dt>Live availability</dt><dd>Not shown. GameOn has no booking link with this venue.</dd></div><div><dt>Source</dt><dd>{selectedPlace.sourceUrl?<a href={selectedPlace.sourceUrl} target="_blank" rel="noopener noreferrer">{selectedPlace.sourceName||"Source"} ↗</a>:"None recorded"}{selectedPlace.sourceCheckedOn&&` · checked ${String(selectedPlace.sourceCheckedOn).slice(0,10)}`}</dd></div>{selectedPlace.contactPhoneNumber&&!selectedPlace.isVerified&&<div><dt>Phone</dt><dd>Published number, not yet confirmed by GameOn</dd></div>}</dl>}{selectedPlace.note&&<p className="muted">{selectedPlace.note}</p>}{selectedPlace.websiteUrl&&<a className="secondary" href={selectedPlace.websiteUrl} target="_blank" rel="noopener noreferrer">Venue website ↗</a>}{selectedPlace.contactPhoneNumber&&/^\+[0-9]{7,15}$/.test(selectedPlace.contactPhoneNumber)&&<a className="secondary" href={`tel:${selectedPlace.contactPhoneNumber}`}>Call venue</a>}<a className="secondary" href={selectedPlace.googleMapsURI} target="_blank" rel="noopener noreferrer">Directions in Google Maps ↗</a></section>}
     </div>
     {value&&<label>Selected location name<input required maxLength={120} value={value.name} onChange={e=>onSelect({...value,name:e.target.value})}/><small className="muted">Pin: {value.latitude.toFixed(5)}, {value.longitude.toFixed(5)}</small></label>}
     {error&&<p className="alert" role="alert">{error}</p>}
