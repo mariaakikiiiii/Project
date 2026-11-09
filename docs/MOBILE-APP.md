@@ -22,7 +22,7 @@ The Android project lives in `frontend/android`. The app id is `lb.gameon.app`.
 
 ### First build: needs a good internet connection
 
-The first Android build downloads about 300-400 MB (Gradle and Android libraries). Do it on a fast connection; after that everything is cached and builds take about a minute. Easiest way: open `frontendndroid` in **Android Studio**, wait for "Gradle sync" to finish (bottom bar), then press **Run**.
+The first Android build downloads about 300-400 MB (Gradle and Android libraries). Do it on a fast connection; after that everything is cached and builds take about a minute. Easiest way: open `frontend\android` in **Android Studio**, wait for "Gradle sync" to finish (bottom bar), then press **Run**.
 
 ### Build the .apk (Developer PowerShell, in the `frontend` folder)
 
