@@ -708,3 +708,6 @@ h1,h2 { letter-spacing: -.035em; }
   .site-header { padding-top: max(14px, env(safe-area-inset-top)); }
   body { padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* Invisible marker used to scroll chat to the newest message: must not look like a bubble */
+.messages li.scroll-anchor { padding: 0; border: 0; background: none; min-height: 0; height: 1px; }

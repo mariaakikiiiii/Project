@@ -87,7 +87,7 @@ function Thread({ conv, me, onBack }) {
       <ol className="messages" aria-live="polite">
         {messages.length === 0 && <li className="muted">Say hi 👋</li>}
         {messages.map((m) => <li key={m.messageId} className={m.senderId === me ? "mine" : ""}><small>{m.senderId === me ? "You" : m.senderName} · {new Date(m.createdAt + "Z").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small><p>{m.body}</p></li>)}
-        <li ref={end} aria-hidden="true" />
+        <li ref={end} aria-hidden="true" className="scroll-anchor" />
       </ol>
       <form className="composer" onSubmit={send}><input aria-label="Message" maxLength={1000} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message" /><button className="primary" disabled={!body.trim()}>Send</button></form>
       {error && <p className="alert" role="alert">{error}</p>}
