@@ -702,3 +702,9 @@ h1,h2 { letter-spacing: -.035em; }
 .announcement { padding: 10px 16px; text-align: center; font-weight: 700; color: #111; background: linear-gradient(135deg, #ff6b00, #facc15); }
 .admin-users li { align-items: flex-start; flex-wrap: wrap; }
 .admin-users li > span:first-child { flex: 1 1 320px; }
+
+/* Installed app / phone notch: keep content clear of the status bar and home indicator */
+@supports (padding: env(safe-area-inset-top)) {
+  .site-header { padding-top: max(14px, env(safe-area-inset-top)); }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+}

@@ -1,0 +1,13 @@
+{
+  "appId": "lb.gameon.app",
+  "appName": "GameOn",
+  "webDir": "dist",
+  "server": {
+    "url": "http://localhost:5173",
+    "cleartext": true,
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#111111"
+  }
+}

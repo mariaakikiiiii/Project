@@ -1512,3 +1512,7 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")).render(<App />);
+// Installable app: register the service worker in production builds (not during development, so changes show instantly).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}

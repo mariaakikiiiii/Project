@@ -9,6 +9,8 @@
     "test:ui": "node tests/ui-check.cjs"
   },
   "dependencies": {
+    "@capacitor/android": "6.2.3",
+    "@capacitor/core": "6.2.3",
     "@microsoft/signalr": "8.0.7",
     "leaflet": "1.9.4",
     "qrcode": "1.5.4",
@@ -16,6 +18,7 @@
     "react-dom": "19.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "6.2.1",
     "playwright-core": "1.64.1",
     "vite": "6.4.5"
   }

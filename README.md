@@ -1,5 +1,7 @@
 # Latest update
 
+**GameOn as an app:** installable from Chrome/Edge (PWA) and an Android app project (Capacitor) in `frontend/android`. See [docs/MOBILE-APP.md](docs/MOBILE-APP.md).
+
 **Newest: migration 31 (admin panel).** Admins can suspend, restore and delete users, manage roles, change app settings (announcement, sign-ups, Shots, Pro price) and review reported photos. Read [docs/ADMIN.md](docs/ADMIN.md). Run `database/31-admin.sql` before starting the new API.
 
 **Newest: migration 29 (features matched to Sportciety).** Pay courts from the wallet, club booking approval, memberships with QR check-in, class packs and attendance, player groups, CRM and broadcasts, inventory, payroll, club payouts, and Shots (photo sharing). Read [docs/UPDATE-29.md](docs/UPDATE-29.md). Run `database/29-club-suite.sql` after 27, then `npm ci` in `frontend`.
