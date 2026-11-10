@@ -8,7 +8,7 @@ public sealed class Database(IConfiguration config)
     public static SqlParameter P(string name, SqlDbType type, object? value, int size = 0)
     {
         var p = new SqlParameter(name, type) { Value = value ?? DBNull.Value };
-        if (size > 0) p.Size = size;
+        if (size != 0) p.Size = size; // -1 = nvarchar(max)
         return p;
     }
     public async Task<List<List<Dictionary<string, object?>>>> Call(

@@ -1,0 +1,76 @@
+-- Non-executable template. scripts/build-migration.py turns this into database/33-security-hardening.sql.
+-- Security hardening: chat messages are stored encrypted (AES-256-GCM, done by the API with a key that is never in the
+-- database), and password hashes can be upgraded to the peppered format at sign-in. No rows are deleted.
+USE GameOn;
+GO
+BEGIN TRANSACTION;
+ALTER TABLE dbo.Messages DROP CONSTRAINT CK_Msg_Body;
+ALTER TABLE dbo.Messages ALTER COLUMN Body nvarchar(max) NOT NULL;
+ALTER TABLE dbo.Messages ADD CONSTRAINT CK_Msg_Body CHECK(LEN(Body)>=1 AND LEN(Body)<=6000);
+GO
+CREATE OR ALTER PROCEDURE dbo.SendMessage @ConversationId bigint,@UserId int,@Body nvarchar(max),@ClientKey uniqueidentifier AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ SET @Body=TRIM(@Body);
+ -- Migration 33: the API sends only AES-GCM ciphertext; plain text is refused so it can never be stored by mistake.
+ IF @Body IS NULL OR LEFT(@Body,5)<>'enc1:' OR LEN(@Body) NOT BETWEEN 33 AND 6000 THROW 50002,'Write a message (up to 1000 characters).',1;
+ IF dbo.CanUseConversation(@ConversationId,@UserId)=0 THROW 50003,'You are not part of this chat.',1;
+ -- Simple flood control: 20 messages per minute per sender.
+ IF (SELECT COUNT(*) FROM dbo.Messages WHERE SenderId=@UserId AND CreatedAt>DATEADD(minute,-1,SYSUTCDATETIME()))>=20 THROW 50004,'You are sending messages too fast. Wait a moment.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Id bigint=(SELECT MessageId FROM dbo.Messages WHERE SenderId=@UserId AND ClientKey=@ClientKey);
+  IF @Id IS NULL
+  BEGIN
+   INSERT dbo.Messages(ConversationId,SenderId,Body,ClientKey) VALUES(@ConversationId,@UserId,@Body,@ClientKey);
+   SET @Id=SCOPE_IDENTITY();
+   UPDATE dbo.Conversations SET LastMessageAt=SYSUTCDATETIME() WHERE ConversationId=@ConversationId;
+   MERGE dbo.ConversationReads AS t USING (SELECT @ConversationId c,@UserId u) s ON t.ConversationId=s.c AND t.UserId=s.u
+   WHEN MATCHED THEN UPDATE SET LastReadMessageId=@Id WHEN NOT MATCHED THEN INSERT(ConversationId,UserId,LastReadMessageId) VALUES(@ConversationId,@UserId,@Id);
+  END;
+  COMMIT;
+  SELECT m.MessageId,m.ConversationId,m.SenderId,u.DisplayName AS SenderName,m.Body,m.CreatedAt FROM dbo.Messages m JOIN dbo.Users u ON u.UserId=m.SenderId WHERE m.MessageId=@Id;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ListConversations @UserId int AS
+BEGIN
+ SET NOCOUNT ON;
+ SELECT TOP(100) c.ConversationId,c.Kind,c.GameId,c.ClubId,c.GroupId,c.LastMessageAt,
+  CASE c.Kind WHEN 'Game' THEN s.Name+N' - '+FORMAT(dbo.ToBeirut(g.StartsAt),'ddd d MMM HH:mm') WHEN 'Club' THEN CASE WHEN c.UserLow=@UserId THEN cl.Name ELSE cl.Name+N' - '+pu.DisplayName END
+   WHEN 'Group' THEN pg.Name ELSE (SELECT DisplayName FROM dbo.Users WHERE UserId=IIF(c.UserLow=@UserId,c.UserHigh,c.UserLow)) END AS Title,
+  (SELECT TOP(1) m.Body FROM dbo.Messages m WHERE m.ConversationId=c.ConversationId ORDER BY m.MessageId DESC) AS LastMessage,
+  (SELECT COUNT(*) FROM dbo.Messages m WHERE m.ConversationId=c.ConversationId AND m.SenderId<>@UserId
+    AND m.MessageId>COALESCE((SELECT r.LastReadMessageId FROM dbo.ConversationReads r WHERE r.ConversationId=c.ConversationId AND r.UserId=@UserId),0)) AS Unread
+ FROM dbo.Conversations c LEFT JOIN dbo.GamesAndEvents g ON g.EventId=c.GameId LEFT JOIN dbo.Subtypes s ON s.SubtypeId=g.SubtypeId
+  LEFT JOIN dbo.Clubs cl ON cl.ClubId=c.ClubId LEFT JOIN dbo.Users pu ON pu.UserId=c.UserLow AND c.Kind='Club' LEFT JOIN dbo.PlayerGroups pg ON pg.GroupId=c.GroupId
+ WHERE dbo.CanUseConversation(c.ConversationId,@UserId)=1 AND (c.LastMessageAt IS NOT NULL OR c.Kind NOT IN('Club') OR c.UserLow=@UserId)
+ ORDER BY COALESCE(c.LastMessageAt,c.CreatedAt) DESC;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ListPlainMessages @Top int AS
+BEGIN
+ SET NOCOUNT ON;
+ SELECT TOP(@Top) MessageId,ConversationId,Body FROM dbo.Messages
+ WHERE LEFT(Body,5)<>'enc1:' AND Body<>N'(message from a deleted account)' ORDER BY MessageId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.EncryptMessageBody @MessageId bigint,@Plain nvarchar(max),@Cipher nvarchar(max) AS
+BEGIN
+ SET NOCOUNT ON;
+ IF @Cipher IS NULL OR LEFT(@Cipher,5)<>'enc1:' THROW 50002,'Ciphertext expected.',1;
+ -- Only replaces the exact plain text that was read, so a concurrent change is never overwritten.
+ UPDATE dbo.Messages SET Body=@Cipher WHERE MessageId=@MessageId AND Body=@Plain AND LEFT(Body,5)<>'enc1:';
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.UpgradePasswordHash @UserId int,@OldHash nvarchar(512),@NewHash nvarchar(512) AS
+BEGIN
+ SET NOCOUNT ON;
+ IF @NewHash IS NULL OR LEFT(@NewHash,3)<>'p1$' THROW 50002,'Peppered hash expected.',1;
+ -- Same password, stronger storage: sessions stay valid, so SecurityVersion is not changed.
+ UPDATE dbo.Users SET PasswordHash=@NewHash WHERE UserId=@UserId AND PasswordHash=@OldHash AND PasswordHash<>N'DISABLED_FIXTURE';
+END;
+GO
+GRANT EXECUTE ON dbo.ListPlainMessages TO gameon_executor;
+GRANT EXECUTE ON dbo.EncryptMessageBody TO gameon_executor;
+GRANT EXECUTE ON dbo.UpgradePasswordHash TO gameon_executor;

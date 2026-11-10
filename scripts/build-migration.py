@@ -37,6 +37,11 @@ MIGRATIONS = {
              title='platform admins: users (suspend/restore/delete with anonymisation), roles, app settings, moderation, audit log, session stamps.',
              guard=""" IF OBJECT_ID(N'dbo.Shots',N'U') IS NULL THROW 50002,'Migration 29 must be installed first.',1;
 """),
+    33: dict(name='33-security-hardening', prior=31,
+             title='encrypted chat messages (AES-256-GCM ciphertext only) and peppered password-hash upgrades.',
+             guard=""" IF OBJECT_ID(N'dbo.AdminAudit',N'U') IS NULL OR NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name=N'CK_Msg_Body')
+  THROW 50002,'Migration 31 must be installed first.',1;
+"""),
 }
 
 
