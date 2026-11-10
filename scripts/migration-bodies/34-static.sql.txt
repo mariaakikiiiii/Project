@@ -1,0 +1,198 @@
+-- Non-executable template. scripts/gen-34.py adds the edited existing procedures, then
+-- scripts/build-migration.py turns the result into database/34-db-hardening.sql.
+-- 1) Money moves only in procedures: the 7 triggers that refunded, flagged or credited money are replaced by explicit calls.
+-- 2) Wallet balance = sum of ledger rows, enforced by the database (indexed view + check triggers + row locks).
+-- 3) Chat messages encrypted by SQL Server (AES-256 symmetric key protected by a certificate).
+-- 4) Password hashes upgraded to Argon2id at sign-in. 5) Admin analytics.
+USE GameOn;
+GO
+BEGIN TRANSACTION;
+-- Database master key (only if the database has none). Its random password is never shown or stored:
+-- SQL Server also protects it with the service master key. Back it up with docs/SECURITY.md.
+EXEC(N'IF NOT EXISTS(SELECT 1 FROM sys.symmetric_keys WHERE name=N''##MS_DatabaseMasterKey##'') BEGIN DECLARE @p nvarchar(100)=CONVERT(nvarchar(64),CRYPT_GEN_RANDOM(32),2)+N''Gm!9x''; DECLARE @s nvarchar(300)=N''CREATE MASTER KEY ENCRYPTION BY PASSWORD = ''''''+@p+N''''''''; EXEC(@s); END');
+CREATE CERTIFICATE GameOnMessageCert WITH SUBJECT='GameOn chat message encryption', EXPIRY_DATE='20991231';
+CREATE SYMMETRIC KEY GameOnMessageKey WITH ALGORITHM=AES_256 ENCRYPTION BY CERTIFICATE GameOnMessageCert;
+ALTER TABLE dbo.Messages DROP CONSTRAINT CK_Msg_Body;
+ALTER TABLE dbo.Messages ALTER COLUMN Body nvarchar(max) NULL;
+ALTER TABLE dbo.Messages ADD BodyCipher varbinary(max) NULL;
+OPEN SYMMETRIC KEY GameOnMessageKey DECRYPTION BY CERTIFICATE GameOnMessageCert;
+UPDATE dbo.Messages SET BodyCipher=ENCRYPTBYKEY(KEY_GUID(N'GameOnMessageKey'),CONVERT(nvarchar(1000),Body),1,CONVERT(varbinary(8),ConversationId)),Body=NULL WHERE LEFT(Body,5)<>'enc1:' AND Body<>N'(message from a deleted account)';
+CLOSE SYMMETRIC KEY GameOnMessageKey;
+ALTER TABLE dbo.Messages ADD CONSTRAINT CK_Msg_Body CHECK((Body IS NULL AND BodyCipher IS NOT NULL) OR (BodyCipher IS NULL AND (LEFT(Body,5)='enc1:' OR Body=N'(message from a deleted account)')));
+DROP PROCEDURE dbo.EncryptMessageBody;
+DROP PROCEDURE dbo.ListPlainMessages;
+DROP TRIGGER dbo.WalletDepositRefund;
+DROP TRIGGER dbo.DepositEventCancelled;
+DROP TRIGGER dbo.ManualWhishEventCancelled;
+DROP TRIGGER dbo.ManualWhishParticipationRemoved;
+DROP TRIGGER dbo.DepositParticipationRemoved;
+DROP TRIGGER dbo.ClassPackCreditReturn;
+DROP TRIGGER dbo.LoyaltyGamePlayed;
+CREATE VIEW dbo.WalletLedgerTotals WITH SCHEMABINDING AS SELECT UserId,SUM(Amount) AS LedgerTotal,COUNT_BIG(*) AS Entries FROM dbo.WalletLedger GROUP BY UserId;
+CREATE UNIQUE CLUSTERED INDEX UX_WalletLedgerTotals ON dbo.WalletLedgerTotals(UserId);
+GO
+-- @@GENERATED_MODULES@@
+GO
+CREATE OR ALTER PROCEDURE dbo.SettleWalletDepositRefunds @GameId int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. A wallet-paid $1 deposit that became refundable goes back to the wallet now
+ -- (the money never left GameOn). Idempotent: the ledger allows one DepositRefund row per deposit.
+ DECLARE @D uniqueidentifier,@U int,@A decimal(12,2);
+ DECLARE r CURSOR LOCAL FAST_FORWARD FOR
+  SELECT d.DepositID,d.UserId,d.DepositAmount FROM dbo.DepositBookings d
+  WHERE d.GameId=@GameId AND d.PaymentMethod='Wallet' AND d.DepositStatus IN('REFUND_PENDING','REFUNDED')
+   AND NOT EXISTS(SELECT 1 FROM dbo.WalletLedger l WHERE l.Kind='DepositRefund' AND l.DepositID=d.DepositID);
+ OPEN r; FETCH NEXT FROM r INTO @D,@U,@A;
+ WHILE @@FETCH_STATUS=0
+ BEGIN
+  EXEC dbo.WalletPost @UserId=@U,@Amount=@A,@Kind='DepositRefund',@DepositID=@D,@Note=N'$1 commitment deposit returned to wallet';
+  UPDATE dbo.DepositBookings SET DepositStatus='REFUNDED',RefundReference=N'WALLET-'+CONVERT(nvarchar(36),@D),RefundedAt=SYSUTCDATETIME() WHERE DepositID=@D;
+  UPDATE dbo.Participations SET DepositStatus='REFUNDED' WHERE GameId=@GameId AND UserId=@U;
+  INSERT dbo.Notifications(UserId,GameId,Title,Body) VALUES(@U,@GameId,N'$1 is back in your wallet',N'Your commitment deposit was returned to your GameOn wallet. Use it for your next game or withdraw it to Whish.');
+  FETCH NEXT FROM r INTO @D,@U,@A;
+ END;
+ CLOSE r; DEALLOCATE r;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ReturnClassCredit @ClassId int,@UserId int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. A cancelled class paid with a pack credit gives that credit back, once.
+ UPDATE p SET CreditsLeft=p.CreditsLeft+1 FROM dbo.ClubPurchases p JOIN dbo.ClassRegistrations r ON r.PurchaseId=p.PurchaseId
+ WHERE r.ClassId=@ClassId AND r.UserId=@UserId AND r.Status='Cancelled';
+ UPDATE dbo.ClassRegistrations SET PurchaseId=NULL WHERE ClassId=@ClassId AND UserId=@UserId AND Status='Cancelled' AND PurchaseId IS NOT NULL;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletLedgerAppendOnly ON dbo.WalletLedger AFTER UPDATE,DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only: the ledger is append-only history. Corrections are new rows.
+ IF EXISTS(SELECT 1 FROM deleted) THROW 50003,'Wallet ledger rows can never be changed or deleted. Post a correcting entry instead.',1;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletLedgerBalanceCheck ON dbo.WalletLedger AFTER INSERT AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only (never moves money): after every posting, balance = SUM(ledger) and the newest BalanceAfter = balance.
+ IF EXISTS(SELECT 1 FROM inserted i WHERE NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts a WHERE a.UserId=i.UserId))
+  OR EXISTS(SELECT 1 FROM (SELECT DISTINCT UserId FROM inserted) i
+   JOIN dbo.WalletAccounts a ON a.UserId=i.UserId
+   JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=i.UserId
+   CROSS APPLY (SELECT TOP(1) l.BalanceAfter FROM dbo.WalletLedger l WHERE l.UserId=i.UserId ORDER BY l.EntryId DESC) last
+   WHERE a.Balance<>t.LedgerTotal OR last.BalanceAfter<>a.Balance)
+  THROW 50007,'Wallet integrity check failed: the balance must equal the sum of its ledger rows.',1;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletAccountBalanceCheck ON dbo.WalletAccounts AFTER INSERT,UPDATE AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only. WalletPost/WalletDebit/BuyPro mark their posting; its ledger row follows in the same
+ -- transaction and is verified by WalletLedgerBalanceCheck. Any other balance change is refused.
+ IF SESSION_CONTEXT(N'GameOn.WalletPosting') IS NOT NULL RETURN;
+ IF EXISTS(SELECT 1 FROM inserted i LEFT JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=i.UserId WHERE i.Balance<>COALESCE(t.LedgerTotal,0))
+  THROW 50007,'A wallet balance can only change through a ledger posting (WalletPost).',1;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.CheckWalletIntegrity AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Report for the presentation: every wallet, its balance, its ledger total, and whether they match.
+ SELECT a.UserId,a.Balance,COALESCE(t.LedgerTotal,0) AS LedgerTotal,COALESCE(t.Entries,0) AS Entries,
+  CASE WHEN a.Balance=COALESCE(t.LedgerTotal,0) THEN 'OK' ELSE 'MISMATCH' END AS Result
+ FROM dbo.WalletAccounts a LEFT JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=a.UserId ORDER BY a.UserId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ListLegacyMessages @Top int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Messages encrypted by the API before migration 34 ("enc1:"); the API decrypts them once and SealLegacyMessage stores them with the SQL Server key.
+ SELECT TOP(@Top) MessageId,ConversationId,Body FROM dbo.Messages WHERE LEFT(Body,5)='enc1:' ORDER BY MessageId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.SealLegacyMessage @MessageId bigint,@Expected nvarchar(max),@Plain nvarchar(1000) WITH EXECUTE AS OWNER AS
+BEGIN
+ SET NOCOUNT ON;
+ OPEN SYMMETRIC KEY GameOnMessageKey DECRYPTION BY CERTIFICATE GameOnMessageCert;
+ UPDATE dbo.Messages SET BodyCipher=ENCRYPTBYKEY(KEY_GUID(N'GameOnMessageKey'),@Plain,1,CONVERT(varbinary(8),ConversationId)),Body=NULL
+ WHERE MessageId=@MessageId AND Body=@Expected AND LEFT(Body,5)='enc1:';
+ CLOSE SYMMETRIC KEY GameOnMessageKey;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.UpgradePasswordHash @UserId int,@OldHash nvarchar(512),@NewHash nvarchar(512) AS
+BEGIN
+ SET NOCOUNT ON;
+ IF @NewHash IS NULL OR LEFT(@NewHash,10)<>'$argon2id$' THROW 50002,'Argon2id hash expected.',1;
+ -- Same password, stronger storage: sessions stay valid, so SecurityVersion is not changed.
+ UPDATE dbo.Users SET PasswordHash=@NewHash WHERE UserId=@UserId AND PasswordHash=@OldHash AND PasswordHash<>N'DISABLED_FIXTURE';
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.AdminAnalytics @AdminId int,@Months int=12 AS
+BEGIN
+ SET NOCOUNT ON;
+ IF dbo.IsAdmin(@AdminId)=0 THROW 50003,'Admins only.',1;
+ IF @Months IS NULL OR @Months NOT BETWEEN 1 AND 36 SET @Months=12;
+ DECLARE @Now datetime2(3)=SYSUTCDATETIME();
+ DECLARE @From datetime2(3)=DATEADD(month,1-@Months,DATEFROMPARTS(YEAR(@Now),MONTH(@Now),1));
+ DECLARE @MinGroup int=5; -- privacy: age/gender groups with fewer players are hidden
+ -- Every booking activity in the period: court bookings that were kept, and players joining games.
+ CREATE TABLE #Act(Kind varchar(5) NOT NULL,UserId int NOT NULL,At datetime2(3) NOT NULL,SubtypeId int NULL,ClubId int NULL,Value decimal(12,2) NOT NULL,NoShow bit NOT NULL);
+ INSERT #Act SELECT 'Court',b.UserId,b.StartsAt,c.SubtypeId,c.ClubId,b.Price,IIF(b.Status='NoShow',1,0)
+ FROM dbo.CourtBookings b JOIN dbo.Courts c ON c.CourtId=b.CourtId
+ WHERE b.StartsAt>=@From AND b.StartsAt<@Now AND b.Status IN('Confirmed','Completed','NoShow') AND b.UserId IS NOT NULL;
+ INSERT #Act SELECT 'Game',p.UserId,g.StartsAt,g.SubtypeId,NULL,g.CostPerPlayer,0
+ FROM dbo.Participations p JOIN dbo.GamesAndEvents g ON g.EventId=p.GameId
+ WHERE g.StartsAt>=@From AND g.StartsAt<@Now AND g.GameStatus<>'Cancelled' AND p.UserId<>g.HostUserId;
+ CREATE TABLE #U(UserId int PRIMARY KEY,AgeGroup varchar(12) NOT NULL,AgeOrder tinyint NOT NULL,Gender varchar(20) NOT NULL);
+ INSERT #U SELECT u.UserId,
+  CASE WHEN x.Age IS NULL THEN 'Not given' WHEN x.Age<18 THEN 'Under 18' WHEN x.Age<25 THEN '18-24' WHEN x.Age<35 THEN '25-34' WHEN x.Age<45 THEN '35-44' ELSE '45+' END,
+  CASE WHEN x.Age IS NULL THEN 9 WHEN x.Age<18 THEN 1 WHEN x.Age<25 THEN 2 WHEN x.Age<35 THEN 3 WHEN x.Age<45 THEN 4 ELSE 5 END,
+  CASE u.Gender WHEN 'Female' THEN 'Female' WHEN 'Male' THEN 'Male' WHEN 'NonBinary' THEN 'Non-binary' ELSE 'Not given' END
+ FROM dbo.Users u CROSS APPLY(SELECT DATEDIFF(year,u.DateOfBirth,@Now)-IIF(DATEADD(year,DATEDIFF(year,u.DateOfBirth,@Now),u.DateOfBirth)>@Now,1,0) AS Age) x
+ WHERE u.UserId IN(SELECT DISTINCT UserId FROM #Act);
+ -- 1. Month by month: activity, value booked at clubs, GameOn's own income, sign-ups (one grouped pass per source).
+ CREATE TABLE #M(MonthStart date PRIMARY KEY);
+ INSERT #M SELECT TOP(@Months) DATEADD(month,ROW_NUMBER() OVER(ORDER BY (SELECT 1))-1,CONVERT(date,@From)) FROM sys.all_objects;
+ SELECT FORMAT(m.MonthStart,'yyyy-MM') AS Month,COALESCE(a.CourtBookings,0) AS CourtBookings,COALESCE(a.GameJoins,0) AS GameJoins,
+  COALESCE(a.CourtValue,0) AS CourtValue,COALESCE(f.Fees,0) AS PlatformFees,COALESCE(p.Pro,0) AS ProSales,COALESCE(n.NewUsers,0) AS NewUsers
+ FROM #M m
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(At),MONTH(At),1) AS M,SUM(IIF(Kind='Court',1,0)) AS CourtBookings,SUM(IIF(Kind='Game',1,0)) AS GameJoins,SUM(IIF(Kind='Court',Value,0)) AS CourtValue
+  FROM #Act GROUP BY DATEFROMPARTS(YEAR(At),MONTH(At),1)) a ON a.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(DepositPaidAt),MONTH(DepositPaidAt),1) AS M,SUM(ServiceFee) AS Fees FROM dbo.DepositBookings WHERE DepositPaidAt>=@From
+  GROUP BY DATEFROMPARTS(YEAR(DepositPaidAt),MONTH(DepositPaidAt),1)) f ON f.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1) AS M,SUM(PricePaid) AS Pro FROM dbo.Memberships WHERE CreatedAt>=@From
+  GROUP BY DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1)) p ON p.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1) AS M,COUNT(*) AS NewUsers FROM dbo.Users WHERE CreatedAt>=@From AND PasswordHash<>N'DISABLED_FIXTURE'
+  GROUP BY DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1)) n ON n.M=m.MonthStart
+ ORDER BY m.MonthStart;
+ -- 2. By age group and 3. by gender (counts hidden when fewer than @MinGroup players).
+ SELECT u.AgeGroup AS [Group],IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(*)) AS Bookings,IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(DISTINCT a.UserId)) AS Players
+ FROM #Act a JOIN #U u ON u.UserId=a.UserId GROUP BY u.AgeGroup,u.AgeOrder ORDER BY u.AgeOrder;
+ SELECT u.Gender AS [Group],IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(*)) AS Bookings,IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(DISTINCT a.UserId)) AS Players
+ FROM #Act a JOIN #U u ON u.UserId=a.UserId GROUP BY u.Gender ORDER BY COUNT(*) DESC;
+ -- 4. By sport.
+ SELECT s.Name AS Sport,SUM(IIF(a.Kind='Court',1,0)) AS CourtBookings,SUM(IIF(a.Kind='Game',1,0)) AS GameJoins,SUM(IIF(a.Kind='Court',a.Value,0)) AS CourtValue
+ FROM #Act a JOIN dbo.Subtypes s ON s.SubtypeId=a.SubtypeId GROUP BY s.Name ORDER BY COUNT(*) DESC;
+ -- 5. By hour of day in Beirut (peak-price planning).
+ -- Group by UTC day+hour first, then convert each group once (time-zone conversion per row is slow).
+ SELECT DATEPART(hour,dbo.ToBeirut(g.H)) AS Hour,SUM(g.N) AS Bookings
+ FROM (SELECT DATEADD(hour,DATEPART(hour,At),CONVERT(datetime2(3),CONVERT(date,At))) AS H,COUNT(*) AS N FROM #Act GROUP BY CONVERT(date,At),DATEPART(hour,At)) g
+ GROUP BY DATEPART(hour,dbo.ToBeirut(g.H)) ORDER BY Hour;
+ -- 6. Health of the marketplace.
+ SELECT
+  (SELECT COUNT(*) FROM dbo.CourtBookings b WHERE b.StartsAt>=@From AND b.StartsAt<@Now) AS CourtBookingsAll,
+  (SELECT COUNT(*) FROM dbo.CourtBookings b WHERE b.StartsAt>=@From AND b.StartsAt<@Now AND b.Status='Cancelled') AS CourtCancelled,
+  (SELECT COUNT(*) FROM #Act WHERE NoShow=1) AS NoShows,
+  (SELECT COUNT(*) FROM dbo.DepositDisputes WHERE CreatedAt>=@From) AS DisputesOpened,
+  (SELECT COUNT(*) FROM dbo.DepositDisputes WHERE Status='Open') AS DisputesOpenNow,
+  (SELECT COUNT(DISTINCT UserId) FROM #Act) AS ActivePlayers,
+  (SELECT COUNT(*) FROM (SELECT UserId FROM #Act GROUP BY UserId HAVING COUNT(*)>=2) r) AS RepeatPlayers;
+ -- 7. Top clubs by value booked.
+ SELECT TOP(10) c.Name AS Club,COUNT(*) AS Bookings,SUM(a.Value) AS CourtValue,SUM(CONVERT(int,a.NoShow)) AS NoShows
+ FROM #Act a JOIN dbo.Clubs c ON c.ClubId=a.ClubId WHERE a.Kind='Court' GROUP BY c.Name ORDER BY SUM(a.Value) DESC;
+END;
+GO
+GRANT EXECUTE ON dbo.ListLegacyMessages TO gameon_executor;
+GRANT EXECUTE ON dbo.SealLegacyMessage TO gameon_executor;
+GRANT EXECUTE ON dbo.AdminAnalytics TO gameon_executor;
+GRANT EXECUTE ON dbo.UpgradePasswordHash TO gameon_executor;

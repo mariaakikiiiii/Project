@@ -42,6 +42,17 @@ MIGRATIONS = {
              guard=""" IF OBJECT_ID(N'dbo.AdminAudit',N'U') IS NULL OR NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name=N'CK_Msg_Body')
   THROW 50002,'Migration 31 must be installed first.',1;
 """),
+    34: dict(name='34-db-hardening', prior=33,
+             title='money only in procedures (no money in triggers), enforced wallet balance = ledger sum, SQL Server message encryption (certificate + AES-256 key), Argon2id password upgrades, admin analytics.',
+             guard=""" IF OBJECT_ID(N'dbo.ListPlainMessages',N'P') IS NULL THROW 50002,'Migration 33 must be installed first.',1;
+ IF EXISTS(SELECT 1 FROM dbo.WalletAccounts a WHERE a.Balance<>COALESCE((SELECT SUM(l.Amount) FROM dbo.WalletLedger l WHERE l.UserId=a.UserId),0))
+  THROW 50002,'A wallet balance does not match its ledger. Stop and report this message (nothing was changed).',1;
+ IF EXISTS(SELECT 1 FROM sys.certificates WHERE name=N'GameOnMessageCert') THROW 50002,'GameOnMessageCert already exists. Stop and report this message.',1;
+"""),
+    35: dict(name='35-court-booking-performance', prior=34,
+             title='reporting index on CourtBookings(StartsAt) for analytics and monthly revenue; synthetic performance venues hidden from venue search.',
+             guard=""" IF OBJECT_ID(N'dbo.AdminAnalytics',N'P') IS NULL THROW 50002,'Migration 34 must be installed first.',1;
+"""),
 }
 
 

@@ -1,0 +1,676 @@
+-- Non-executable template. scripts/gen-34.py adds the edited existing procedures, then
+-- scripts/build-migration.py turns the result into database/34-db-hardening.sql.
+-- 1) Money moves only in procedures: the 7 triggers that refunded, flagged or credited money are replaced by explicit calls.
+-- 2) Wallet balance = sum of ledger rows, enforced by the database (indexed view + check triggers + row locks).
+-- 3) Chat messages encrypted by SQL Server (AES-256 symmetric key protected by a certificate).
+-- 4) Password hashes upgraded to Argon2id at sign-in. 5) Admin analytics.
+USE GameOn;
+GO
+BEGIN TRANSACTION;
+-- Database master key (only if the database has none). Its random password is never shown or stored:
+-- SQL Server also protects it with the service master key. Back it up with docs/SECURITY.md.
+EXEC(N'IF NOT EXISTS(SELECT 1 FROM sys.symmetric_keys WHERE name=N''##MS_DatabaseMasterKey##'') BEGIN DECLARE @p nvarchar(100)=CONVERT(nvarchar(64),CRYPT_GEN_RANDOM(32),2)+N''Gm!9x''; DECLARE @s nvarchar(300)=N''CREATE MASTER KEY ENCRYPTION BY PASSWORD = ''''''+@p+N''''''''; EXEC(@s); END');
+CREATE CERTIFICATE GameOnMessageCert WITH SUBJECT='GameOn chat message encryption', EXPIRY_DATE='20991231';
+CREATE SYMMETRIC KEY GameOnMessageKey WITH ALGORITHM=AES_256 ENCRYPTION BY CERTIFICATE GameOnMessageCert;
+ALTER TABLE dbo.Messages DROP CONSTRAINT CK_Msg_Body;
+ALTER TABLE dbo.Messages ALTER COLUMN Body nvarchar(max) NULL;
+ALTER TABLE dbo.Messages ADD BodyCipher varbinary(max) NULL;
+OPEN SYMMETRIC KEY GameOnMessageKey DECRYPTION BY CERTIFICATE GameOnMessageCert;
+UPDATE dbo.Messages SET BodyCipher=ENCRYPTBYKEY(KEY_GUID(N'GameOnMessageKey'),CONVERT(nvarchar(1000),Body),1,CONVERT(varbinary(8),ConversationId)),Body=NULL WHERE LEFT(Body,5)<>'enc1:' AND Body<>N'(message from a deleted account)';
+CLOSE SYMMETRIC KEY GameOnMessageKey;
+ALTER TABLE dbo.Messages ADD CONSTRAINT CK_Msg_Body CHECK((Body IS NULL AND BodyCipher IS NOT NULL) OR (BodyCipher IS NULL AND (LEFT(Body,5)='enc1:' OR Body=N'(message from a deleted account)')));
+DROP PROCEDURE dbo.EncryptMessageBody;
+DROP PROCEDURE dbo.ListPlainMessages;
+DROP TRIGGER dbo.WalletDepositRefund;
+DROP TRIGGER dbo.DepositEventCancelled;
+DROP TRIGGER dbo.ManualWhishEventCancelled;
+DROP TRIGGER dbo.ManualWhishParticipationRemoved;
+DROP TRIGGER dbo.DepositParticipationRemoved;
+DROP TRIGGER dbo.ClassPackCreditReturn;
+DROP TRIGGER dbo.LoyaltyGamePlayed;
+CREATE VIEW dbo.WalletLedgerTotals WITH SCHEMABINDING AS SELECT UserId,SUM(Amount) AS LedgerTotal,COUNT_BIG(*) AS Entries FROM dbo.WalletLedger GROUP BY UserId;
+CREATE UNIQUE CLUSTERED INDEX UX_WalletLedgerTotals ON dbo.WalletLedgerTotals(UserId);
+GO
+CREATE OR ALTER PROCEDURE dbo.CancelGame @GameId int,@HostUserId int AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Owner int,@Status varchar(12),@Start datetime2(3);
+  SELECT @Owner=HostUserId,@Status=GameStatus,@Start=StartsAt FROM dbo.GamesAndEvents WITH(UPDLOCK,HOLDLOCK) WHERE EventId=@GameId;
+  IF @Owner IS NULL THROW 50001,'Game not found.',1;
+  IF @Owner<>@HostUserId THROW 50003,'Only the host can cancel this game.',1;
+  IF @Status='Open'
+  BEGIN
+   IF @Start<=SYSUTCDATETIME() THROW 50002,'This game has started. Report that it did not take place from the game page instead.',1;
+   UPDATE dbo.GamesAndEvents SET GameStatus='Cancelled',Revision=Revision+1 WHERE EventId=@GameId;
+   UPDATE dbo.Payments SET Status=CASE WHEN Status='MockSucceeded' THEN 'MockCancelled' ELSE 'Cancelled' END
+   WHERE GameID=@GameId AND Status IN('PendingCash','MockPending','MockSucceeded');
+   -- Host cancellation: every held deposit is owed back; unverified transfers need reconciliation.
+   UPDATE dbo.DepositBookings SET DepositStatus='REFUND_PENDING',
+    ReviewNote=CASE WHEN DepositStatus='PAID_HELD' THEN N'Host cancelled the game. Refund owed.' ELSE N'Host cancelled before verification. Reconcile any received transfer, then refund it.' END
+   WHERE GameId=@GameId AND DepositStatus IN('PAID_HELD','PENDING');
+   UPDATE p SET DepositStatus='REFUND_PENDING' FROM dbo.Participations p JOIN dbo.DepositBookings d ON d.GameId=p.GameId AND d.UserId=p.UserId
+   WHERE p.GameId=@GameId AND d.DepositStatus='REFUND_PENDING' AND p.DepositStatus='PAID_HELD';
+   INSERT dbo.GameActivityLogs(GameId,ActorUserId,ActivityType) VALUES(@GameId,@HostUserId,'GameCancelled');
+   INSERT dbo.Notifications(UserId,GameId,Title,Body)
+   SELECT m.UserId,@GameId,N'Game cancelled',
+    CASE WHEN EXISTS(SELECT 1 FROM dbo.DepositBookings d WHERE d.GameId=@GameId AND d.UserId=m.UserId AND d.DepositStatus='REFUND_PENDING')
+     THEN N'The host cancelled this game. Your $1 deposit (and any amount you transferred) is queued for refund. It shows as Refunded once the transfer is confirmed.'
+     ELSE N'The host cancelled your game. Find another game in Discover.' END
+   FROM (SELECT UserId FROM dbo.Participations WHERE GameId=@GameId UNION SELECT UserId FROM dbo.Waitlists WHERE GameId=@GameId UNION SELECT UserId FROM dbo.DepositBookings WHERE GameId=@GameId AND DepositStatus='REFUND_PENDING') m
+   WHERE m.UserId<>@HostUserId;
+   -- Money movement is explicit here (it used to be hidden in triggers).
+   UPDATE dbo.Payments SET Status='RefundReview',ReviewNote=N'Event cancelled. Check Whish statement and arrange any refund manually.'
+   WHERE GameID=@GameId AND Mode='WhishManual' AND Status<>'Cancelled';
+   EXEC dbo.SettleWalletDepositRefunds @GameId;
+   EXEC dbo.RefreshDepositEvent @GameId;
+  END;
+  COMMIT;
+ END TRY
+ BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.CancelParticipation @GameId int,@UserId int AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Id int,@Start datetime2(3),@Status varchar(12),@Host int,@NextUser int,@Waitlist bigint,@Method varchar(12),@AcceptedFee bit,@Deposit bit;
+  SELECT @Id=EventId,@Start=StartsAt,@Status=GameStatus,@Host=HostUserId,@Deposit=RequiresDeposit FROM dbo.GamesAndEvents WITH(UPDLOCK,HOLDLOCK) WHERE EventId=@GameId;
+  IF @Id IS NULL THROW 50001,'Event not found.',1;
+  IF @Start<=SYSUTCDATETIME() OR @Status<>'Open' THROW 50002,'Event is no longer open.',1;
+  IF @UserId=@Host THROW 50002,'Hosts cannot leave their own game. Cancel the game instead so players are refunded.',1;
+  DELETE dbo.Participations WHERE GameId=@GameId AND UserId=@UserId;
+  IF @@ROWCOUNT=1
+  BEGIN
+   UPDATE dbo.Payments SET Status=CASE WHEN Status='MockSucceeded' THEN 'MockCancelled' ELSE 'Cancelled' END
+   WHERE GameID=@GameId AND UserID=@UserId AND Status IN('PendingCash','MockPending','MockSucceeded');
+   -- Money movement is explicit here (it used to be hidden in triggers).
+   UPDATE dbo.Payments SET Status='RefundReview',ReviewNote=N'Booking removed. Check Whish statement and arrange any refund manually.'
+   WHERE GameID=@GameId AND UserID=@UserId AND Mode='WhishManual' AND Status<>'Cancelled';
+   -- No forfeiture or refund policy is assumed for a player who leaves: funds stay held for an operator decision.
+   UPDATE dbo.DepositBookings SET PlayerLeftAt=SYSUTCDATETIME(),
+    ReviewNote=N'Player left before the start. Player-cancellation policy not decided: operator review required. No automatic refund or forfeiture.'
+   WHERE GameId=@GameId AND UserId=@UserId AND DepositStatus='PAID_HELD';
+   INSERT dbo.GameActivityLogs(GameId,ActorUserId,ActivityType) VALUES(@GameId,@UserId,'Cancelled');
+   SELECT TOP(1) @NextUser=UserId,@Waitlist=WaitlistId,@Method=PaymentMethod,@AcceptedFee=AcceptedServiceFee FROM dbo.Waitlists WHERE GameId=@GameId AND @Deposit=0 ORDER BY WaitlistId;
+   IF @NextUser IS NOT NULL
+   BEGIN
+    DELETE dbo.Waitlists WHERE WaitlistId=@Waitlist;
+    INSERT dbo.Participations(GameId,UserId,PaymentMethod) VALUES(@GameId,@NextUser,@Method);
+    INSERT dbo.Payments(UserID,GameID,Amount,ServiceFee,Currency,Mode,Status,IdempotencyKey,EventRevision)
+    SELECT @NextUser,EventId,CostPerPlayer,dbo.PlatformServiceFee(CostPerPlayer),Currency,'Cash','PendingCash',NEWID(),Revision
+    FROM dbo.GamesAndEvents WHERE EventId=@GameId AND CostPerPlayer>0 AND @AcceptedFee=1;
+    INSERT dbo.GameActivityLogs(GameId,ActorUserId,ActivityType) VALUES(@GameId,@NextUser,'Promoted');
+    INSERT dbo.Notifications(UserId,GameId,Title,Body)
+    VALUES(@NextUser,@GameId,N'A place opened. You are in!',N'You moved from the waitlist to the roster. Your original venue share and payment preference apply.');
+   END;
+   IF @Deposit=1
+    INSERT dbo.Notifications(UserId,GameId,Title,Body) SELECT TOP(1) UserId,@GameId,N'A spot opened - pay your deposit',N'Open the event to start deposit checkout. Your place is confirmed only after an operator verifies the transfer.' FROM dbo.Waitlists WHERE GameId=@GameId ORDER BY WaitlistId;
+  END
+  ELSE
+  BEGIN
+   DELETE dbo.Waitlists WHERE GameId=@GameId AND UserId=@UserId;
+   IF @@ROWCOUNT=1 INSERT dbo.GameActivityLogs(GameId,ActorUserId,ActivityType) VALUES(@GameId,@UserId,'LeftWaitlist');
+  END;
+  UPDATE dbo.DepositBookings SET DepositStatus='REFUND_PENDING',ReviewNote=N'Deposit request withdrawn. Reconcile any actual transfer before recording a refund.' WHERE GameId=@GameId AND UserId=@UserId AND DepositStatus='PENDING';
+  EXEC dbo.SettleWalletDepositRefunds @GameId;
+  EXEC dbo.RefreshDepositEvent @GameId;
+  COMMIT;
+  SELECT 'Cancelled' AS Status;
+ END TRY
+ BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.EvaluateAttendance @GameId int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction and the event lock. Wallet-paid refunds and points are settled explicitly at the end.
+ DECLARE @Host int,@HostHeld bit,@Outcome varchar(16);
+ SELECT @Host=g.HostUserId,@HostHeld=CASE WHEN u.HostHoldAt IS NULL THEN 0 ELSE 1 END FROM dbo.GamesAndEvents g JOIN dbo.Users u ON u.UserId=g.HostUserId WHERE g.EventId=@GameId;
+ SELECT @Outcome=Outcome FROM dbo.EventCompletions WHERE GameId=@GameId;
+ IF @Outcome='DidNotTakePlace'
+ BEGIN
+  -- The host admits the game did not happen: every held deposit is owed back to its player.
+  UPDATE dbo.DepositBookings SET DepositStatus='REFUND_PENDING',ReviewNote=N'Host reported the game did not take place. Refund owed.'
+  WHERE GameId=@GameId AND DepositStatus='PAID_HELD';
+ END
+ ELSE IF @Outcome='Played'
+ BEGIN
+  IF @HostHeld=0
+   UPDATE d SET DepositStatus='REFUND_PENDING',ReviewNote=N'Host and player both confirmed attendance. Refund owed.'
+   FROM dbo.DepositBookings d JOIN dbo.EventAttendance a ON a.GameId=d.GameId AND a.UserId=d.UserId
+   WHERE d.GameId=@GameId AND d.DepositStatus='PAID_HELD' AND a.HostMark='Attended' AND a.PlayerMark='Attended';
+  DECLARE @Mismatch TABLE(DepositID uniqueidentifier,UserId int,Reason varchar(24));
+  INSERT @Mismatch SELECT d.DepositID,d.UserId,CASE WHEN a.PlayerMark='NotPlayed' THEN 'FalseCompletion' ELSE 'AttendanceMismatch' END
+  FROM dbo.DepositBookings d JOIN dbo.EventAttendance a ON a.GameId=d.GameId AND a.UserId=d.UserId
+  WHERE d.GameId=@GameId AND d.DepositStatus='PAID_HELD' AND a.HostMark IS NOT NULL AND a.PlayerMark IS NOT NULL
+   AND NOT(a.HostMark='Attended' AND a.PlayerMark='Attended');
+  DECLARE @D uniqueidentifier,@U int,@R varchar(24);
+  WHILE EXISTS(SELECT 1 FROM @Mismatch)
+  BEGIN
+   SELECT TOP(1) @D=DepositID,@U=UserId,@R=Reason FROM @Mismatch;
+   EXEC dbo.OpenDisputeInternal @GameId,@D,@U,@R,N'Host and player attendance reports disagree. Operator review required.';
+   DELETE @Mismatch WHERE DepositID=@D;
+  END;
+ END;
+ UPDATE p SET DepositStatus=d.DepositStatus FROM dbo.Participations p JOIN dbo.DepositBookings d ON d.GameId=p.GameId AND d.UserId=p.UserId
+ WHERE p.GameId=@GameId AND d.DepositStatus IN('REFUND_PENDING','DISPUTED') AND p.DepositStatus<>d.DepositStatus;
+ INSERT dbo.Notifications(UserId,GameId,Title,Body)
+ SELECT d.UserId,@GameId,N'Your $1 deposit refund is queued',N'Attendance was confirmed. An operator will send the refund and record its Whish reference; it shows as Refunded only after that.'
+ FROM dbo.DepositBookings d WHERE d.GameId=@GameId AND d.DepositStatus='REFUND_PENDING' AND d.ReviewNote LIKE N'Host and player both confirmed%'
+  AND NOT EXISTS(SELECT 1 FROM dbo.Notifications n WHERE n.UserId=d.UserId AND n.GameId=@GameId AND n.Title=N'Your $1 deposit refund is queued');
+ -- Points only when the host AND the player both confirm (was trigger LoyaltyGamePlayed). LoyaltyPost is idempotent.
+ DECLARE @PointsUser int;
+ DECLARE pts CURSOR LOCAL FAST_FORWARD FOR SELECT a.UserId FROM dbo.EventAttendance a WHERE a.GameId=@GameId AND a.HostMark='Attended' AND a.PlayerMark='Attended';
+ OPEN pts; FETCH NEXT FROM pts INTO @PointsUser;
+ WHILE @@FETCH_STATUS=0 BEGIN EXEC dbo.LoyaltyPost @PointsUser,50,'GamePlayed','Game',@GameId,N'Played a GameOn game'; FETCH NEXT FROM pts INTO @PointsUser; END;
+ CLOSE pts; DEALLOCATE pts;
+ EXEC dbo.SettleWalletDepositRefunds @GameId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ResolveDispute @DisputeId bigint,@UserId int,@Outcome varchar(16),@Note nvarchar(800) AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ IF NOT EXISTS(SELECT 1 FROM dbo.PaymentOperators WHERE UserId=@UserId) THROW 50003,'Payment operator access required.',1;
+ IF @Outcome IS NULL OR @Outcome NOT IN('RefundOwed','Restored','NoAction') OR @Note IS NULL OR LEN(TRIM(@Note))<4 THROW 50002,'Choose an outcome and write a resolution note.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Game int,@D uniqueidentifier,@Status varchar(10),@Raised int,@Host int,@Owner int,@Prev varchar(20),@Ref nvarchar(100);
+  SELECT @Game=GameId,@D=DepositID,@Status=Status,@Raised=RaisedBy FROM dbo.DepositDisputes WITH(UPDLOCK,HOLDLOCK) WHERE DisputeId=@DisputeId;
+  IF @Game IS NULL THROW 50001,'Dispute not found.',1;
+  IF @Status<>'Open' THROW 50004,'This dispute is already resolved.',1;
+  SELECT @Host=HostUserId FROM dbo.GamesAndEvents WITH(UPDLOCK,HOLDLOCK) WHERE EventId=@Game;
+  SELECT @Owner=UserId,@Prev=StatusBeforeDispute,@Ref=RefundReference FROM dbo.DepositBookings WITH(UPDLOCK) WHERE DepositID=@D;
+  IF @UserId IN(@Host,@Raised) OR @UserId=@Owner THROW 50003,'Operators cannot resolve disputes they are part of.',1;
+  IF @D IS NOT NULL
+  BEGIN
+   IF @Outcome='RefundOwed'
+    -- A failed refund keeps its old reference in the audit note; a new settlement reference is then required.
+    UPDATE dbo.DepositBookings SET DepositStatus='REFUND_PENDING',StatusBeforeDispute=NULL,RefundReference=NULL,RefundedAt=NULL,
+     ReviewNote=N'Dispute resolved: refund owed. '+CASE WHEN @Ref IS NULL THEN N'' ELSE N'Previous refund reference '+@Ref+N' reported as not received. ' END+TRIM(@Note)
+    WHERE DepositID=@D;
+   ELSE
+    UPDATE dbo.DepositBookings SET DepositStatus=COALESCE(@Prev,'PAID_HELD'),StatusBeforeDispute=NULL,ReviewNote=N'Dispute resolved: '+TRIM(@Note) WHERE DepositID=@D;
+   UPDATE p SET DepositStatus=CASE WHEN d.DepositStatus='REJECTED' THEN 'PENDING' ELSE d.DepositStatus END FROM dbo.Participations p JOIN dbo.DepositBookings d ON d.GameId=p.GameId AND d.UserId=p.UserId WHERE d.DepositID=@D;
+   INSERT dbo.DepositReviews(DepositID,OperatorId,Decision,Note) VALUES(@D,@UserId,'DISPUTE_'+UPPER(LEFT(@Outcome,8)),TRIM(@Note));
+  END;
+  UPDATE dbo.DepositDisputes SET Status='Resolved',Outcome=@Outcome,Resolution=TRIM(@Note),ResolvedBy=@UserId,ResolvedAt=SYSUTCDATETIME() WHERE DisputeId=@DisputeId;
+  IF @Raised IS NOT NULL INSERT dbo.Notifications(UserId,GameId,Title,Body) VALUES(@Raised,@Game,N'Your dispute was resolved',LEFT(N'Outcome: '+@Outcome+N'. '+TRIM(@Note),800));
+  EXEC dbo.SettleWalletDepositRefunds @Game;
+  EXEC dbo.RefreshDepositEvent @Game;
+  COMMIT;
+  SELECT 'Resolved' AS Status;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ReviewDeposit @DepositID uniqueidentifier,@UserId int,@Decision varchar(20),@Note nvarchar(400),@RefundReference nvarchar(100)=NULL AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON; SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+ IF NOT EXISTS(SELECT 1 FROM dbo.PaymentOperators WHERE UserId=@UserId) THROW 50003,'Payment operator access required.',1;
+ IF @Decision='FORFEIT' THROW 50002,'No-show forfeiture is disabled until the business approves a written no-show policy.',1;
+ IF @Decision IS NULL OR @Decision NOT IN('VERIFY','REJECT','REFUND') OR @Note IS NULL OR LEN(TRIM(@Note))<4 THROW 50002,'Enter a decision and reconciliation note.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Game int,@Owner int,@Capacity int,@Start datetime2(3),@State varchar(12),@Revision int,@Venue int,@Slots int,@StoredRevision int,@Host int,
+   @Status varchar(20),@Reference nvarchar(100),@Base decimal(12,2),@Fee decimal(12,2),@Covered bit,@Payment uniqueidentifier,@Recipient varchar(20),@PaidAt datetime,@Method varchar(12),@Left datetime2(3);
+  SELECT @Game=GameId FROM dbo.DepositBookings WHERE DepositID=@DepositID;
+  IF @Game IS NULL THROW 50001,'Deposit not found.',1;
+  SELECT @Capacity=Capacity,@Start=StartsAt,@State=GameStatus,@Revision=Revision,@Venue=VenueId,@Slots=SponsoredSlots,@Host=HostUserId FROM dbo.GamesAndEvents WITH(UPDLOCK,HOLDLOCK) WHERE EventId=@Game;
+  SELECT @Method=PaymentMethod,@Owner=UserId,@Status=DepositStatus,@Reference=TransferReference,@Base=BaseAmount,@Fee=ServiceFee,@Covered=ClaimSponsored,@StoredRevision=EventRevision,
+   @Recipient=RecipientNumber,@Payment=PaymentId,@PaidAt=DepositPaidAt,@Left=PlayerLeftAt
+  FROM dbo.DepositBookings WITH(UPDLOCK,HOLDLOCK) WHERE DepositID=@DepositID;
+  IF @Owner=@UserId OR @Host=@UserId THROW 50003,'Operators cannot review deposits for their own bookings or games.',1;
+  IF @Status='DISPUTED' THROW 50004,'This deposit is disputed. Resolve the dispute first.',1;
+  IF @Decision='VERIFY'
+  BEGIN
+   IF @Status<>'PENDING' OR @Reference IS NULL THROW 50004,'A pending submitted transfer is required.',1;
+   IF EXISTS(SELECT 1 FROM dbo.Users WHERE UserId=@Host AND HostHoldAt IS NOT NULL) THROW 50004,'This host is on a fraud-review hold. Do not accept new deposits for their games; reconcile and refund instead.',1;
+   IF EXISTS(SELECT 1 FROM dbo.VerifiedWhishTransfers WHERE TransferReference=@Reference) THROW 50004,'This transfer reference has already settled another booking.',1;
+   DECLARE @CanJoin bit=CASE WHEN @State='Open' AND @Start>SYSUTCDATETIME() AND @Revision=@StoredRevision
+    AND (SELECT COUNT(*) FROM dbo.Participations WHERE GameId=@Game)<@Capacity
+    AND NOT EXISTS(SELECT 1 FROM dbo.Participations WHERE GameId=@Game AND UserId=@Owner)
+    AND EXISTS(SELECT 1 FROM dbo.Venues WHERE VenueId=@Venue AND IsVerified=1 AND ContactPhoneNumber IS NOT NULL)
+    AND (@Covered=0 OR @Slots>(SELECT COUNT(*) FROM dbo.SponsoredSeats WHERE GameId=@Game)) THEN 1 ELSE 0 END;
+   IF @CanJoin=1
+   BEGIN
+    UPDATE dbo.DepositBookings SET DepositStatus='PAID_HELD',DepositPaidAt=GETUTCDATE() WHERE DepositID=@DepositID;
+    DELETE dbo.Waitlists WHERE GameId=@Game AND UserId=@Owner;
+    DECLARE @JoinResult varchar(20);
+    EXEC dbo.sp_JoinGameOrActivity @GameId=@Game,@UserId=@Owner,@ClaimSponsored=@Covered,@PaymentMethod='Cash',@CashIdempotencyKey=@DepositID,@ResultStatus=@JoinResult OUTPUT,@ReturnResult=0,@DepositAuthorizationID=@DepositID;
+    IF @JoinResult<>'Joined' THROW 50004,'The deposit could not authorize a spot.',1;
+    SELECT @Payment=PaymentID FROM dbo.Payments WHERE UserID=@Owner AND IdempotencyKey=@DepositID;
+   END;
+   IF @Payment IS NULL
+   BEGIN
+    SET @Payment=NEWID();
+    INSERT dbo.Payments(PaymentID,UserID,GameID,Amount,ServiceFee,Currency,Mode,Status,IdempotencyKey,EventRevision,RecipientNumber,TransferReference)
+    VALUES(@Payment,@Owner,@Game,CASE WHEN @Method='Cash' THEN 0 ELSE @Base END,CASE WHEN @Method='Cash' THEN 0 ELSE @Fee END,'USD','WhishManual',CASE WHEN @CanJoin=1 THEN 'VerifiedManual' ELSE 'RefundReview' END,@DepositID,@StoredRevision,@Recipient,@Reference);
+   END
+   ELSE IF @Method='WhishManual' UPDATE dbo.Payments SET Mode='WhishManual',Status='VerifiedManual',RecipientNumber=@Recipient,TransferReference=@Reference,CompletedAt=SYSUTCDATETIME() WHERE PaymentID=@Payment;
+   INSERT dbo.VerifiedWhishTransfers(TransferReference,PaymentId) VALUES(@Reference,@Payment);
+   UPDATE dbo.DepositBookings SET PaymentId=@Payment,DepositStatus=CASE WHEN @CanJoin=1 THEN 'PAID_HELD' ELSE 'REFUND_PENDING' END,
+    DepositPaidAt=GETUTCDATE(),ReviewNote=CASE WHEN @CanJoin=1 THEN @Note ELSE N'Transfer verified but the place was no longer available. Refund owed. '+@Note END WHERE DepositID=@DepositID;
+   IF @CanJoin=1 UPDATE dbo.Participations SET PaymentMethod=@Method WHERE GameId=@Game AND UserId=@Owner;
+  END
+  ELSE IF @Decision='REJECT'
+  BEGIN
+   IF @Status<>'PENDING' AND NOT(@Status='REFUND_PENDING' AND @PaidAt IS NULL) THROW 50004,'Only an unverified transfer can be rejected.',1;
+   UPDATE dbo.DepositBookings SET DepositStatus='REJECTED',ReviewNote=@Note WHERE DepositID=@DepositID;
+  END
+  ELSE
+  BEGIN
+   -- A refund is recorded only after the operator confirms the outgoing transfer settled.
+   IF NOT(@Status='REFUND_PENDING' OR (@Status='PAID_HELD' AND (@Left IS NOT NULL OR @State='Cancelled' OR @Start<=SYSUTCDATETIME())))
+    THROW 50004,'Deposit is not eligible for refund yet.',1;
+   IF @RefundReference IS NULL OR LEN(TRIM(@RefundReference)) NOT BETWEEN 4 AND 100 THROW 50002,'Record the actual external refund reference.',1;
+   IF EXISTS(SELECT 1 FROM dbo.DepositBookings WHERE RefundReference=TRIM(@RefundReference)) THROW 50004,'This refund reference is already recorded for another deposit. Duplicate refunds are blocked.',1;
+   IF @Payment IS NULL
+   BEGIN
+    IF @Reference IS NULL THROW 50002,'A reconciled original transfer reference is required before recording a refund.',1;
+    IF EXISTS(SELECT 1 FROM dbo.VerifiedWhishTransfers WHERE TransferReference=@Reference) THROW 50004,'Transfer reference already belongs to another booking.',1;
+    SET @Payment=NEWID();
+    INSERT dbo.Payments(PaymentID,UserID,GameID,Amount,ServiceFee,Currency,Mode,Status,IdempotencyKey,EventRevision,RecipientNumber,TransferReference)
+    VALUES(@Payment,@Owner,@Game,CASE WHEN @Method='Cash' THEN 0 ELSE @Base END,CASE WHEN @Method='Cash' THEN 0 ELSE @Fee END,'USD','WhishManual','Cancelled',@DepositID,@StoredRevision,@Recipient,@Reference);
+    INSERT dbo.VerifiedWhishTransfers(TransferReference,PaymentId) VALUES(@Reference,@Payment);
+    UPDATE dbo.DepositBookings SET PaymentId=@Payment,DepositPaidAt=GETUTCDATE() WHERE DepositID=@DepositID;
+   END;
+   UPDATE dbo.DepositBookings SET DepositStatus='REFUNDED',RefundReference=TRIM(@RefundReference),RefundedAt=SYSUTCDATETIME(),ReviewNote=@Note WHERE DepositID=@DepositID;
+   UPDATE dbo.Participations SET DepositStatus='REFUNDED' WHERE GameId=@Game AND UserId=@Owner;
+   UPDATE dbo.Payments SET Status='Cancelled',ReviewNote=@Note WHERE PaymentID=@Payment AND Status='RefundReview';
+   INSERT dbo.Notifications(UserId,GameId,Title,Body) VALUES(@Owner,@Game,N'Deposit refund sent',N'An operator recorded your refund with reference '+TRIM(@RefundReference)+N'. If it has not arrived, open a dispute from Payments.');
+  END;
+  INSERT dbo.DepositReviews(DepositID,OperatorId,Decision,Note) VALUES(@DepositID,@UserId,@Decision,@Note);
+  INSERT dbo.UserActivityLogs(UserId,EventId,Action,DepositStatus,DepositAmount,RequiresDeposit)
+  SELECT @Owner,@Game,'DepositReviewed',DepositStatus,DepositAmount,1 FROM dbo.DepositBookings WHERE DepositID=@DepositID;
+  EXEC dbo.SettleWalletDepositRefunds @Game;
+  EXEC dbo.RefreshDepositEvent @Game;
+  COMMIT;
+  EXEC dbo.GetDepositBooking @DepositID,@Owner;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.RegisterForClass @ClassId int,@UserId int,@Cancel bit=0 AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Cap smallint,@Start datetime2(0),@Status varchar(10);
+  SELECT @Cap=Capacity,@Start=StartsAt,@Status=Status FROM dbo.Classes WITH(UPDLOCK,HOLDLOCK) WHERE ClassId=@ClassId;
+  IF @Cap IS NULL THROW 50001,'Class not found.',1;
+  IF @Status<>'Scheduled' OR @Start<=SYSUTCDATETIME() THROW 50002,'This class is no longer open.',1;
+  IF @Cancel=1
+  BEGIN
+   DECLARE @WasRegistered bit=IIF(EXISTS(SELECT 1 FROM dbo.ClassRegistrations WHERE ClassId=@ClassId AND UserId=@UserId AND Status='Registered'),1,0);
+   UPDATE dbo.ClassRegistrations SET Status='Cancelled' WHERE ClassId=@ClassId AND UserId=@UserId AND Status<>'Cancelled';
+   DECLARE @Changed int=@@ROWCOUNT;
+   IF @WasRegistered=1 EXEC dbo.ReturnClassCredit @ClassId,@UserId; -- was trigger ClassPackCreditReturn
+   IF @Changed=1
+   BEGIN
+    EXEC dbo.LoyaltyPost @UserId,-15,'Reversal','Class',@ClassId,N'Class cancelled';
+    -- First waitlisted player takes the place.
+    DECLARE @Next int=(SELECT TOP(1) UserId FROM dbo.ClassRegistrations WHERE ClassId=@ClassId AND Status='Waitlisted' ORDER BY CreatedAt);
+    IF @Next IS NOT NULL
+    BEGIN
+     UPDATE dbo.ClassRegistrations SET Status='Registered' WHERE ClassId=@ClassId AND UserId=@Next;
+     EXEC dbo.LoyaltyPost @Next,15,'Class','Class',@ClassId,N'Class registration';
+     INSERT dbo.Notifications(UserId,Title,Body) VALUES(@Next,N'You''re in the class',N'A place opened and you moved from the waitlist.');
+    END;
+   END;
+   COMMIT; SELECT 'Cancelled' AS Status; RETURN;
+  END;
+  DECLARE @Mine varchar(10)=(SELECT Status FROM dbo.ClassRegistrations WHERE ClassId=@ClassId AND UserId=@UserId);
+  IF @Mine IN('Registered','Waitlisted') BEGIN COMMIT; SELECT @Mine AS Status; RETURN; END;
+  DECLARE @New varchar(10)=CASE WHEN (SELECT COUNT(*) FROM dbo.ClassRegistrations WHERE ClassId=@ClassId AND Status='Registered')<@Cap THEN 'Registered' ELSE 'Waitlisted' END;
+  MERGE dbo.ClassRegistrations AS t USING (SELECT @ClassId c,@UserId u) s ON t.ClassId=s.c AND t.UserId=s.u
+  WHEN MATCHED THEN UPDATE SET Status=@New,CreatedAt=SYSUTCDATETIME() WHEN NOT MATCHED THEN INSERT(ClassId,UserId,Status) VALUES(@ClassId,@UserId,@New);
+  IF @New='Registered'
+  BEGIN
+   -- Points for a class are earned once; re-registering after a cancellation does not earn again.
+   EXEC dbo.LoyaltyPost @UserId,15,'Class','Class',@ClassId,N'Class registration';
+   INSERT dbo.UserActivityLogs(UserId,SubtypeId,Action) SELECT @UserId,SubtypeId,'ClassJoined' FROM dbo.Classes WHERE ClassId=@ClassId;
+  END;
+  COMMIT;
+  SELECT @New AS Status;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.AdminDeleteUser @AdminId int,@UserId int,@Reason nvarchar(300) AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ IF dbo.IsAdmin(@AdminId)=0 THROW 50003,'Admins only.',1;
+ IF @UserId=@AdminId THROW 50002,'You cannot delete your own account here.',1;
+ IF @Reason IS NULL OR LEN(TRIM(@Reason))<4 THROW 50002,'Write the reason for deleting this account.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Status varchar(10)=(SELECT AccountStatus FROM dbo.Users WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId);
+  IF @Status IS NULL THROW 50001,'User not found.',1;
+  IF @Status='Deleted' THROW 50004,'This account is already deleted.',1;
+  IF dbo.IsAdmin(@UserId)=1 THROW 50004,'Remove the admin role before deleting this account.',1;
+  -- Never make money disappear: the player must withdraw (or an operator refund) first.
+  IF EXISTS(SELECT 1 FROM dbo.WalletAccounts WHERE UserId=@UserId AND Balance>0) THROW 50004,'This user still has money in their wallet. Send it back (withdrawal) before deleting.',1;
+  IF EXISTS(SELECT 1 FROM dbo.WalletWithdrawals WHERE UserId=@UserId AND Status='Requested') THROW 50004,'This user has a withdrawal waiting. Process it first.',1;
+  IF EXISTS(SELECT 1 FROM dbo.DepositBookings WHERE UserId=@UserId AND DepositStatus IN('PENDING','PAID_HELD','REFUND_PENDING','DISPUTED')) THROW 50004,'This user has open deposits. Settle them first.',1;
+  IF EXISTS(SELECT 1 FROM dbo.ClubStaff WHERE UserId=@UserId AND Role='Owner') THROW 50004,'This user owns a club. Give the club a new owner first.',1;
+  -- Cancel their upcoming hosted games (players are notified and refunded by the normal rules).
+  DECLARE @G int;
+  DECLARE g CURSOR LOCAL FAST_FORWARD FOR SELECT EventId FROM dbo.GamesAndEvents WHERE HostUserId=@UserId AND GameStatus='Open' AND StartsAt>SYSUTCDATETIME();
+  OPEN g; FETCH NEXT FROM g INTO @G;
+  WHILE @@FETCH_STATUS=0 BEGIN EXEC dbo.CancelGame @GameId=@G,@HostUserId=@UserId; FETCH NEXT FROM g INTO @G; END;
+  CLOSE g; DEALLOCATE g;
+  -- Leave upcoming games and waitlists, cancel upcoming court bookings and classes.
+  DELETE w FROM dbo.Waitlists w JOIN dbo.GamesAndEvents e ON e.EventId=w.GameId WHERE w.UserId=@UserId AND e.StartsAt>SYSUTCDATETIME();
+  DECLARE @LeftGames TABLE(GameId int PRIMARY KEY);
+  DELETE p OUTPUT deleted.GameId INTO @LeftGames FROM dbo.Participations p JOIN dbo.GamesAndEvents e ON e.EventId=p.GameId WHERE p.UserId=@UserId AND e.StartsAt>SYSUTCDATETIME() AND e.HostUserId<>@UserId;
+  -- Money movement is explicit here (it used to be hidden in triggers).
+  UPDATE p SET Status='RefundReview',ReviewNote=N'Booking removed. Check Whish statement and arrange any refund manually.'
+  FROM dbo.Payments p JOIN @LeftGames l ON l.GameId=p.GameID WHERE p.UserID=@UserId AND p.Mode='WhishManual' AND p.Status<>'Cancelled';
+  UPDATE g SET DepositBookingStatus='OPEN_DEPOSITS_PENDING' FROM dbo.GamesAndEvents g JOIN @LeftGames l ON l.GameId=g.EventId;
+  UPDATE dbo.CourtBookings SET Status='Cancelled',CancelledAt=SYSUTCDATETIME() WHERE UserId=@UserId AND Status IN('Pending','Confirmed') AND StartsAt>SYSUTCDATETIME() AND PaidFromWallet=0;
+  IF EXISTS(SELECT 1 FROM dbo.CourtBookings WHERE UserId=@UserId AND Status IN('Pending','Confirmed') AND StartsAt>SYSUTCDATETIME()) THROW 50004,'This user has paid court bookings coming up. Cancel them (refund) first.',1;
+  DECLARE @PaidClasses TABLE(ClassId int PRIMARY KEY);
+  INSERT @PaidClasses SELECT r.ClassId FROM dbo.ClassRegistrations r JOIN dbo.Classes c ON c.ClassId=r.ClassId WHERE r.UserId=@UserId AND r.Status='Registered' AND c.StartsAt>SYSUTCDATETIME();
+  UPDATE r SET Status='Cancelled' FROM dbo.ClassRegistrations r JOIN dbo.Classes c ON c.ClassId=r.ClassId WHERE r.UserId=@UserId AND r.Status<>'Cancelled' AND c.StartsAt>SYSUTCDATETIME();
+  DECLARE @Cl int;
+  WHILE EXISTS(SELECT 1 FROM @PaidClasses) BEGIN SELECT TOP(1) @Cl=ClassId FROM @PaidClasses; EXEC dbo.ReturnClassCredit @Cl,@UserId; DELETE @PaidClasses WHERE ClassId=@Cl; END;
+  -- Erase personal data; keep the anonymous row so bookings, payments and ledgers stay consistent.
+  DELETE dbo.UserSportPreferences WHERE UserId=@UserId;
+  UPDATE dbo.UserPreferences SET Area=NULL WHERE UserId=@UserId;
+  DELETE dbo.Friendships WHERE @UserId IN(UserLow,UserHigh);
+  DELETE dbo.PlayerGroupMembers WHERE UserId=@UserId;
+  DELETE dbo.ClubStaff WHERE UserId=@UserId;
+  DELETE dbo.PaymentOperators WHERE UserId=@UserId;
+  DELETE dbo.CoachSports WHERE UserId=@UserId;
+  DELETE dbo.CoachProfiles WHERE UserId=@UserId;
+  UPDATE dbo.Shots SET Hidden=1,Caption=N'' WHERE UserId=@UserId;
+  UPDATE dbo.Messages SET Body=N'(message from a deleted account)',BodyCipher=NULL WHERE SenderId=@UserId;
+  UPDATE dbo.Users SET AccountStatus='Deleted',DisplayName=N'Deleted user',Email=N'deleted-'+CONVERT(nvarchar(12),@UserId)+N'@gameon.invalid',
+   PasswordHash='DISABLED_FIXTURE',Bio=N'',Gender=NULL,DateOfBirth=NULL,StatusReason=TRIM(@Reason),StatusChangedAt=SYSUTCDATETIME(),StatusChangedBy=@AdminId,
+   SecurityVersion=SecurityVersion+1,SessionStamp=NEWID() WHERE UserId=@UserId;
+  INSERT dbo.AdminAudit(AdminId,Action,TargetUserId,Detail) VALUES(@AdminId,'Delete',@UserId,TRIM(@Reason));
+  COMMIT;
+  SELECT 'Deleted' AS AccountStatus;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.WalletPost @UserId int,@Amount decimal(12,2),@Kind varchar(20),@TopUpId uniqueidentifier=NULL,@WithdrawalId uniqueidentifier=NULL,
+ @DepositID uniqueidentifier=NULL,@Note nvarchar(400)=NULL,@By int=NULL AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. The account row lock serializes every balance change for one user.
+ IF NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId) INSERT dbo.WalletAccounts(UserId) VALUES(@UserId);
+ DECLARE @Balance decimal(12,2);
+ SELECT @Balance=Balance FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId;
+ IF @Balance+@Amount<0 THROW 50006,'Not enough money in your GameOn wallet. Top up first.',1;
+ IF @Balance+@Amount>500 THROW 50002,'A GameOn wallet can hold at most USD 500.',1;
+ EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=1;
+ UPDATE dbo.WalletAccounts SET Balance=Balance+@Amount,UpdatedAt=SYSUTCDATETIME() WHERE UserId=@UserId;
+ INSERT dbo.WalletLedger(UserId,Amount,BalanceAfter,Kind,TopUpId,WithdrawalId,DepositID,Note,CreatedBy)
+ VALUES(@UserId,@Amount,@Balance+@Amount,@Kind,@TopUpId,@WithdrawalId,@DepositID,@Note,@By);
+ EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=NULL;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.WalletDebit @UserId int,@Amount decimal(12,2),@Kind varchar(20),@CourtBookingId bigint=NULL,@ClubPurchaseId bigint=NULL,@Note nvarchar(400) AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. @Amount is signed (negative = pay, positive = refund).
+ IF NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId) INSERT dbo.WalletAccounts(UserId) VALUES(@UserId);
+ DECLARE @Bal decimal(12,2)=(SELECT Balance FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId);
+ IF @Bal+@Amount<0 THROW 50006,'Not enough money in your GameOn wallet. Top up first.',1;
+ IF @Bal+@Amount>500 THROW 50002,'A GameOn wallet can hold at most USD 500.',1;
+ EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=1;
+ UPDATE dbo.WalletAccounts SET Balance=Balance+@Amount,UpdatedAt=SYSUTCDATETIME() WHERE UserId=@UserId;
+ INSERT dbo.WalletLedger(UserId,Amount,BalanceAfter,Kind,CourtBookingId,ClubPurchaseId,Note) VALUES(@UserId,@Amount,@Bal+@Amount,@Kind,@CourtBookingId,@ClubPurchaseId,@Note);
+ EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=NULL;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.BuyPro @UserId int,@Key uniqueidentifier,@Price decimal(10,2),@Days int AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ IF @Price<=0 OR @Days NOT BETWEEN 1 AND 366 THROW 50002,'Invalid Pro plan.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Id bigint=(SELECT MembershipId FROM dbo.Memberships WHERE UserId=@UserId AND IdempotencyKey=@Key);
+  IF @Id IS NULL
+  BEGIN
+   -- Renewals extend from the current end date, never overlapping.
+   DECLARE @Start datetime2(3)=(SELECT MAX(EndsAt) FROM dbo.Memberships WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId AND EndsAt>SYSUTCDATETIME());
+   SET @Start=COALESCE(@Start,SYSUTCDATETIME());
+   INSERT dbo.Memberships(UserId,Tier,StartsAt,EndsAt,PricePaid,IdempotencyKey) VALUES(@UserId,'Pro',@Start,DATEADD(day,@Days,@Start),@Price,@Key);
+   SET @Id=SCOPE_IDENTITY();
+   DECLARE @Neg decimal(12,2)=-@Price;
+   IF NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId) INSERT dbo.WalletAccounts(UserId) VALUES(@UserId);
+   DECLARE @Bal decimal(12,2)=(SELECT Balance FROM dbo.WalletAccounts WITH(UPDLOCK,HOLDLOCK) WHERE UserId=@UserId);
+   IF @Bal<@Price THROW 50006,'Not enough money in your GameOn wallet. Top up first.',1;
+   EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=1;
+   UPDATE dbo.WalletAccounts SET Balance=Balance-@Price,UpdatedAt=SYSUTCDATETIME() WHERE UserId=@UserId;
+   INSERT dbo.WalletLedger(UserId,Amount,BalanceAfter,Kind,MembershipId,Note) VALUES(@UserId,@Neg,@Bal-@Price,'Membership',@Id,N'GameOn Pro');
+   EXEC sys.sp_set_session_context @key=N'GameOn.WalletPosting',@value=NULL;
+   EXEC dbo.LoyaltyPost @UserId,100,'ProBonus','Membership',@Id,N'Welcome to GameOn Pro';
+  END;
+  COMMIT;
+  SELECT MembershipId,StartsAt,EndsAt FROM dbo.Memberships WHERE MembershipId=@Id;
+ END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.SendMessage @ConversationId bigint,@UserId int,@Body nvarchar(1000),@ClientKey uniqueidentifier WITH EXECUTE AS OWNER AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ SET @Body=TRIM(@Body);
+ IF @Body IS NULL OR LEN(@Body) NOT BETWEEN 1 AND 1000 THROW 50002,'Write a message (up to 1000 characters).',1;
+ IF dbo.CanUseConversation(@ConversationId,@UserId)=0 THROW 50003,'You are not part of this chat.',1;
+ -- Simple flood control: 20 messages per minute per sender.
+ IF (SELECT COUNT(*) FROM dbo.Messages WHERE SenderId=@UserId AND CreatedAt>DATEADD(minute,-1,SYSUTCDATETIME()))>=20 THROW 50004,'You are sending messages too fast. Wait a moment.',1;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @Id bigint=(SELECT MessageId FROM dbo.Messages WHERE SenderId=@UserId AND ClientKey=@ClientKey);
+  IF @Id IS NULL
+  BEGIN
+   -- Encrypted by SQL Server: AES-256 symmetric key, protected by a certificate (never stored in the app or in Git).
+   -- The conversation id is the authenticator, so a ciphertext copied into another chat will not decrypt.
+   OPEN SYMMETRIC KEY GameOnMessageKey DECRYPTION BY CERTIFICATE GameOnMessageCert;
+   INSERT dbo.Messages(ConversationId,SenderId,Body,BodyCipher,ClientKey)
+   VALUES(@ConversationId,@UserId,NULL,ENCRYPTBYKEY(KEY_GUID(N'GameOnMessageKey'),@Body,1,CONVERT(varbinary(8),@ConversationId)),@ClientKey);
+   CLOSE SYMMETRIC KEY GameOnMessageKey;
+   SET @Id=SCOPE_IDENTITY();
+   UPDATE dbo.Conversations SET LastMessageAt=SYSUTCDATETIME() WHERE ConversationId=@ConversationId;
+   MERGE dbo.ConversationReads AS t USING (SELECT @ConversationId c,@UserId u) s ON t.ConversationId=s.c AND t.UserId=s.u
+   WHEN MATCHED THEN UPDATE SET LastReadMessageId=@Id WHEN NOT MATCHED THEN INSERT(ConversationId,UserId,LastReadMessageId) VALUES(@ConversationId,@UserId,@Id);
+  END;
+  COMMIT;
+  SELECT m.MessageId,m.ConversationId,m.SenderId,u.DisplayName AS SenderName,CONVERT(nvarchar(1000),COALESCE(m.Body,CONVERT(nvarchar(1000),DECRYPTBYKEYAUTOCERT(CERT_ID(N'GameOnMessageCert'),NULL,m.BodyCipher,1,CONVERT(varbinary(8),m.ConversationId))))) AS Body,m.CreatedAt FROM dbo.Messages m JOIN dbo.Users u ON u.UserId=m.SenderId WHERE m.MessageId=@Id;
+ END TRY BEGIN CATCH IF EXISTS(SELECT 1 FROM sys.openkeys WHERE key_name=N'GameOnMessageKey') CLOSE SYMMETRIC KEY GameOnMessageKey; IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.GetMessages @ConversationId bigint,@UserId int,@BeforeId bigint=NULL WITH EXECUTE AS OWNER AS
+BEGIN
+ SET NOCOUNT ON;
+ IF dbo.CanUseConversation(@ConversationId,@UserId)=0 THROW 50003,'You are not part of this chat.',1;
+ SELECT TOP(50) m.MessageId,m.ConversationId,m.SenderId,u.DisplayName AS SenderName,CONVERT(nvarchar(1000),COALESCE(m.Body,CONVERT(nvarchar(1000),DECRYPTBYKEYAUTOCERT(CERT_ID(N'GameOnMessageCert'),NULL,m.BodyCipher,1,CONVERT(varbinary(8),m.ConversationId))))) AS Body,m.CreatedAt FROM dbo.Messages m JOIN dbo.Users u ON u.UserId=m.SenderId
+ WHERE m.ConversationId=@ConversationId AND (@BeforeId IS NULL OR m.MessageId<@BeforeId) ORDER BY m.MessageId DESC;
+ DECLARE @Last bigint=(SELECT MAX(MessageId) FROM dbo.Messages WHERE ConversationId=@ConversationId);
+ IF @Last IS NOT NULL AND @BeforeId IS NULL
+  MERGE dbo.ConversationReads AS t USING (SELECT @ConversationId c,@UserId u) s ON t.ConversationId=s.c AND t.UserId=s.u
+  WHEN MATCHED THEN UPDATE SET LastReadMessageId=@Last WHEN NOT MATCHED THEN INSERT(ConversationId,UserId,LastReadMessageId) VALUES(@ConversationId,@UserId,@Last);
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ListConversations @UserId int WITH EXECUTE AS OWNER AS
+BEGIN
+ SET NOCOUNT ON;
+ SELECT TOP(100) c.ConversationId,c.Kind,c.GameId,c.ClubId,c.GroupId,c.LastMessageAt,
+  CASE c.Kind WHEN 'Game' THEN s.Name+N' - '+FORMAT(dbo.ToBeirut(g.StartsAt),'ddd d MMM HH:mm') WHEN 'Club' THEN CASE WHEN c.UserLow=@UserId THEN cl.Name ELSE cl.Name+N' - '+pu.DisplayName END
+   WHEN 'Group' THEN pg.Name ELSE (SELECT DisplayName FROM dbo.Users WHERE UserId=IIF(c.UserLow=@UserId,c.UserHigh,c.UserLow)) END AS Title,
+  (SELECT TOP(1) LEFT(CONVERT(nvarchar(1000),COALESCE(m.Body,CONVERT(nvarchar(1000),DECRYPTBYKEYAUTOCERT(CERT_ID(N'GameOnMessageCert'),NULL,m.BodyCipher,1,CONVERT(varbinary(8),m.ConversationId))))),80) FROM dbo.Messages m WHERE m.ConversationId=c.ConversationId ORDER BY m.MessageId DESC) AS LastMessage,
+  (SELECT COUNT(*) FROM dbo.Messages m WHERE m.ConversationId=c.ConversationId AND m.SenderId<>@UserId
+    AND m.MessageId>COALESCE((SELECT r.LastReadMessageId FROM dbo.ConversationReads r WHERE r.ConversationId=c.ConversationId AND r.UserId=@UserId),0)) AS Unread
+ FROM dbo.Conversations c LEFT JOIN dbo.GamesAndEvents g ON g.EventId=c.GameId LEFT JOIN dbo.Subtypes s ON s.SubtypeId=g.SubtypeId
+  LEFT JOIN dbo.Clubs cl ON cl.ClubId=c.ClubId LEFT JOIN dbo.Users pu ON pu.UserId=c.UserLow AND c.Kind='Club' LEFT JOIN dbo.PlayerGroups pg ON pg.GroupId=c.GroupId
+ WHERE dbo.CanUseConversation(c.ConversationId,@UserId)=1 AND (c.LastMessageAt IS NOT NULL OR c.Kind NOT IN('Club') OR c.UserLow=@UserId)
+ ORDER BY COALESCE(c.LastMessageAt,c.CreatedAt) DESC;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.SettleWalletDepositRefunds @GameId int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. A wallet-paid $1 deposit that became refundable goes back to the wallet now
+ -- (the money never left GameOn). Idempotent: the ledger allows one DepositRefund row per deposit.
+ DECLARE @D uniqueidentifier,@U int,@A decimal(12,2);
+ DECLARE r CURSOR LOCAL FAST_FORWARD FOR
+  SELECT d.DepositID,d.UserId,d.DepositAmount FROM dbo.DepositBookings d
+  WHERE d.GameId=@GameId AND d.PaymentMethod='Wallet' AND d.DepositStatus IN('REFUND_PENDING','REFUNDED')
+   AND NOT EXISTS(SELECT 1 FROM dbo.WalletLedger l WHERE l.Kind='DepositRefund' AND l.DepositID=d.DepositID);
+ OPEN r; FETCH NEXT FROM r INTO @D,@U,@A;
+ WHILE @@FETCH_STATUS=0
+ BEGIN
+  EXEC dbo.WalletPost @UserId=@U,@Amount=@A,@Kind='DepositRefund',@DepositID=@D,@Note=N'$1 commitment deposit returned to wallet';
+  UPDATE dbo.DepositBookings SET DepositStatus='REFUNDED',RefundReference=N'WALLET-'+CONVERT(nvarchar(36),@D),RefundedAt=SYSUTCDATETIME() WHERE DepositID=@D;
+  UPDATE dbo.Participations SET DepositStatus='REFUNDED' WHERE GameId=@GameId AND UserId=@U;
+  INSERT dbo.Notifications(UserId,GameId,Title,Body) VALUES(@U,@GameId,N'$1 is back in your wallet',N'Your commitment deposit was returned to your GameOn wallet. Use it for your next game or withdraw it to Whish.');
+  FETCH NEXT FROM r INTO @D,@U,@A;
+ END;
+ CLOSE r; DEALLOCATE r;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ReturnClassCredit @ClassId int,@UserId int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Caller owns the transaction. A cancelled class paid with a pack credit gives that credit back, once.
+ UPDATE p SET CreditsLeft=p.CreditsLeft+1 FROM dbo.ClubPurchases p JOIN dbo.ClassRegistrations r ON r.PurchaseId=p.PurchaseId
+ WHERE r.ClassId=@ClassId AND r.UserId=@UserId AND r.Status='Cancelled';
+ UPDATE dbo.ClassRegistrations SET PurchaseId=NULL WHERE ClassId=@ClassId AND UserId=@UserId AND Status='Cancelled' AND PurchaseId IS NOT NULL;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletLedgerAppendOnly ON dbo.WalletLedger AFTER UPDATE,DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only: the ledger is append-only history. Corrections are new rows.
+ IF EXISTS(SELECT 1 FROM deleted) THROW 50003,'Wallet ledger rows can never be changed or deleted. Post a correcting entry instead.',1;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletLedgerBalanceCheck ON dbo.WalletLedger AFTER INSERT AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only (never moves money): after every posting, balance = SUM(ledger) and the newest BalanceAfter = balance.
+ IF EXISTS(SELECT 1 FROM inserted i WHERE NOT EXISTS(SELECT 1 FROM dbo.WalletAccounts a WHERE a.UserId=i.UserId))
+  OR EXISTS(SELECT 1 FROM (SELECT DISTINCT UserId FROM inserted) i
+   JOIN dbo.WalletAccounts a ON a.UserId=i.UserId
+   JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=i.UserId
+   CROSS APPLY (SELECT TOP(1) l.BalanceAfter FROM dbo.WalletLedger l WHERE l.UserId=i.UserId ORDER BY l.EntryId DESC) last
+   WHERE a.Balance<>t.LedgerTotal OR last.BalanceAfter<>a.Balance)
+  THROW 50007,'Wallet integrity check failed: the balance must equal the sum of its ledger rows.',1;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.WalletAccountBalanceCheck ON dbo.WalletAccounts AFTER INSERT,UPDATE AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Check only. WalletPost/WalletDebit/BuyPro mark their posting; its ledger row follows in the same
+ -- transaction and is verified by WalletLedgerBalanceCheck. Any other balance change is refused.
+ IF SESSION_CONTEXT(N'GameOn.WalletPosting') IS NOT NULL RETURN;
+ IF EXISTS(SELECT 1 FROM inserted i LEFT JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=i.UserId WHERE i.Balance<>COALESCE(t.LedgerTotal,0))
+  THROW 50007,'A wallet balance can only change through a ledger posting (WalletPost).',1;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.CheckWalletIntegrity AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Report for the presentation: every wallet, its balance, its ledger total, and whether they match.
+ SELECT a.UserId,a.Balance,COALESCE(t.LedgerTotal,0) AS LedgerTotal,COALESCE(t.Entries,0) AS Entries,
+  CASE WHEN a.Balance=COALESCE(t.LedgerTotal,0) THEN 'OK' ELSE 'MISMATCH' END AS Result
+ FROM dbo.WalletAccounts a LEFT JOIN dbo.WalletLedgerTotals t WITH(NOEXPAND) ON t.UserId=a.UserId ORDER BY a.UserId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.ListLegacyMessages @Top int AS
+BEGIN
+ SET NOCOUNT ON;
+ -- Messages encrypted by the API before migration 34 ("enc1:"); the API decrypts them once and SealLegacyMessage stores them with the SQL Server key.
+ SELECT TOP(@Top) MessageId,ConversationId,Body FROM dbo.Messages WHERE LEFT(Body,5)='enc1:' ORDER BY MessageId;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.SealLegacyMessage @MessageId bigint,@Expected nvarchar(max),@Plain nvarchar(1000) WITH EXECUTE AS OWNER AS
+BEGIN
+ SET NOCOUNT ON;
+ OPEN SYMMETRIC KEY GameOnMessageKey DECRYPTION BY CERTIFICATE GameOnMessageCert;
+ UPDATE dbo.Messages SET BodyCipher=ENCRYPTBYKEY(KEY_GUID(N'GameOnMessageKey'),@Plain,1,CONVERT(varbinary(8),ConversationId)),Body=NULL
+ WHERE MessageId=@MessageId AND Body=@Expected AND LEFT(Body,5)='enc1:';
+ CLOSE SYMMETRIC KEY GameOnMessageKey;
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.UpgradePasswordHash @UserId int,@OldHash nvarchar(512),@NewHash nvarchar(512) AS
+BEGIN
+ SET NOCOUNT ON;
+ IF @NewHash IS NULL OR LEFT(@NewHash,10)<>'$argon2id$' THROW 50002,'Argon2id hash expected.',1;
+ -- Same password, stronger storage: sessions stay valid, so SecurityVersion is not changed.
+ UPDATE dbo.Users SET PasswordHash=@NewHash WHERE UserId=@UserId AND PasswordHash=@OldHash AND PasswordHash<>N'DISABLED_FIXTURE';
+END;
+GO
+CREATE OR ALTER PROCEDURE dbo.AdminAnalytics @AdminId int,@Months int=12 AS
+BEGIN
+ SET NOCOUNT ON;
+ IF dbo.IsAdmin(@AdminId)=0 THROW 50003,'Admins only.',1;
+ IF @Months IS NULL OR @Months NOT BETWEEN 1 AND 36 SET @Months=12;
+ DECLARE @Now datetime2(3)=SYSUTCDATETIME();
+ DECLARE @From datetime2(3)=DATEADD(month,1-@Months,DATEFROMPARTS(YEAR(@Now),MONTH(@Now),1));
+ DECLARE @MinGroup int=5; -- privacy: age/gender groups with fewer players are hidden
+ -- Every booking activity in the period: court bookings that were kept, and players joining games.
+ CREATE TABLE #Act(Kind varchar(5) NOT NULL,UserId int NOT NULL,At datetime2(3) NOT NULL,SubtypeId int NULL,ClubId int NULL,Value decimal(12,2) NOT NULL,NoShow bit NOT NULL);
+ INSERT #Act SELECT 'Court',b.UserId,b.StartsAt,c.SubtypeId,c.ClubId,b.Price,IIF(b.Status='NoShow',1,0)
+ FROM dbo.CourtBookings b JOIN dbo.Courts c ON c.CourtId=b.CourtId
+ WHERE b.StartsAt>=@From AND b.StartsAt<@Now AND b.Status IN('Confirmed','Completed','NoShow') AND b.UserId IS NOT NULL;
+ INSERT #Act SELECT 'Game',p.UserId,g.StartsAt,g.SubtypeId,NULL,g.CostPerPlayer,0
+ FROM dbo.Participations p JOIN dbo.GamesAndEvents g ON g.EventId=p.GameId
+ WHERE g.StartsAt>=@From AND g.StartsAt<@Now AND g.GameStatus<>'Cancelled' AND p.UserId<>g.HostUserId;
+ CREATE TABLE #U(UserId int PRIMARY KEY,AgeGroup varchar(12) NOT NULL,AgeOrder tinyint NOT NULL,Gender varchar(20) NOT NULL);
+ INSERT #U SELECT u.UserId,
+  CASE WHEN x.Age IS NULL THEN 'Not given' WHEN x.Age<18 THEN 'Under 18' WHEN x.Age<25 THEN '18-24' WHEN x.Age<35 THEN '25-34' WHEN x.Age<45 THEN '35-44' ELSE '45+' END,
+  CASE WHEN x.Age IS NULL THEN 9 WHEN x.Age<18 THEN 1 WHEN x.Age<25 THEN 2 WHEN x.Age<35 THEN 3 WHEN x.Age<45 THEN 4 ELSE 5 END,
+  CASE u.Gender WHEN 'Female' THEN 'Female' WHEN 'Male' THEN 'Male' WHEN 'NonBinary' THEN 'Non-binary' ELSE 'Not given' END
+ FROM dbo.Users u CROSS APPLY(SELECT DATEDIFF(year,u.DateOfBirth,@Now)-IIF(DATEADD(year,DATEDIFF(year,u.DateOfBirth,@Now),u.DateOfBirth)>@Now,1,0) AS Age) x
+ WHERE u.UserId IN(SELECT DISTINCT UserId FROM #Act);
+ -- 1. Month by month: activity, value booked at clubs, GameOn's own income, sign-ups (one grouped pass per source).
+ CREATE TABLE #M(MonthStart date PRIMARY KEY);
+ INSERT #M SELECT TOP(@Months) DATEADD(month,ROW_NUMBER() OVER(ORDER BY (SELECT 1))-1,CONVERT(date,@From)) FROM sys.all_objects;
+ SELECT FORMAT(m.MonthStart,'yyyy-MM') AS Month,COALESCE(a.CourtBookings,0) AS CourtBookings,COALESCE(a.GameJoins,0) AS GameJoins,
+  COALESCE(a.CourtValue,0) AS CourtValue,COALESCE(f.Fees,0) AS PlatformFees,COALESCE(p.Pro,0) AS ProSales,COALESCE(n.NewUsers,0) AS NewUsers
+ FROM #M m
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(At),MONTH(At),1) AS M,SUM(IIF(Kind='Court',1,0)) AS CourtBookings,SUM(IIF(Kind='Game',1,0)) AS GameJoins,SUM(IIF(Kind='Court',Value,0)) AS CourtValue
+  FROM #Act GROUP BY DATEFROMPARTS(YEAR(At),MONTH(At),1)) a ON a.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(DepositPaidAt),MONTH(DepositPaidAt),1) AS M,SUM(ServiceFee) AS Fees FROM dbo.DepositBookings WHERE DepositPaidAt>=@From
+  GROUP BY DATEFROMPARTS(YEAR(DepositPaidAt),MONTH(DepositPaidAt),1)) f ON f.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1) AS M,SUM(PricePaid) AS Pro FROM dbo.Memberships WHERE CreatedAt>=@From
+  GROUP BY DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1)) p ON p.M=m.MonthStart
+ LEFT JOIN (SELECT DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1) AS M,COUNT(*) AS NewUsers FROM dbo.Users WHERE CreatedAt>=@From AND PasswordHash<>N'DISABLED_FIXTURE'
+  GROUP BY DATEFROMPARTS(YEAR(CreatedAt),MONTH(CreatedAt),1)) n ON n.M=m.MonthStart
+ ORDER BY m.MonthStart;
+ -- 2. By age group and 3. by gender (counts hidden when fewer than @MinGroup players).
+ SELECT u.AgeGroup AS [Group],IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(*)) AS Bookings,IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(DISTINCT a.UserId)) AS Players
+ FROM #Act a JOIN #U u ON u.UserId=a.UserId GROUP BY u.AgeGroup,u.AgeOrder ORDER BY u.AgeOrder;
+ SELECT u.Gender AS [Group],IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(*)) AS Bookings,IIF(COUNT(DISTINCT a.UserId)<@MinGroup,NULL,COUNT(DISTINCT a.UserId)) AS Players
+ FROM #Act a JOIN #U u ON u.UserId=a.UserId GROUP BY u.Gender ORDER BY COUNT(*) DESC;
+ -- 4. By sport.
+ SELECT s.Name AS Sport,SUM(IIF(a.Kind='Court',1,0)) AS CourtBookings,SUM(IIF(a.Kind='Game',1,0)) AS GameJoins,SUM(IIF(a.Kind='Court',a.Value,0)) AS CourtValue
+ FROM #Act a JOIN dbo.Subtypes s ON s.SubtypeId=a.SubtypeId GROUP BY s.Name ORDER BY COUNT(*) DESC;
+ -- 5. By hour of day in Beirut (peak-price planning).
+ -- Group by UTC day+hour first, then convert each group once (time-zone conversion per row is slow).
+ SELECT DATEPART(hour,dbo.ToBeirut(g.H)) AS Hour,SUM(g.N) AS Bookings
+ FROM (SELECT DATEADD(hour,DATEPART(hour,At),CONVERT(datetime2(3),CONVERT(date,At))) AS H,COUNT(*) AS N FROM #Act GROUP BY CONVERT(date,At),DATEPART(hour,At)) g
+ GROUP BY DATEPART(hour,dbo.ToBeirut(g.H)) ORDER BY Hour;
+ -- 6. Health of the marketplace.
+ SELECT
+  (SELECT COUNT(*) FROM dbo.CourtBookings b WHERE b.StartsAt>=@From AND b.StartsAt<@Now) AS CourtBookingsAll,
+  (SELECT COUNT(*) FROM dbo.CourtBookings b WHERE b.StartsAt>=@From AND b.StartsAt<@Now AND b.Status='Cancelled') AS CourtCancelled,
+  (SELECT COUNT(*) FROM #Act WHERE NoShow=1) AS NoShows,
+  (SELECT COUNT(*) FROM dbo.DepositDisputes WHERE CreatedAt>=@From) AS DisputesOpened,
+  (SELECT COUNT(*) FROM dbo.DepositDisputes WHERE Status='Open') AS DisputesOpenNow,
+  (SELECT COUNT(DISTINCT UserId) FROM #Act) AS ActivePlayers,
+  (SELECT COUNT(*) FROM (SELECT UserId FROM #Act GROUP BY UserId HAVING COUNT(*)>=2) r) AS RepeatPlayers;
+ -- 7. Top clubs by value booked.
+ SELECT TOP(10) c.Name AS Club,COUNT(*) AS Bookings,SUM(a.Value) AS CourtValue,SUM(CONVERT(int,a.NoShow)) AS NoShows
+ FROM #Act a JOIN dbo.Clubs c ON c.ClubId=a.ClubId WHERE a.Kind='Court' GROUP BY c.Name ORDER BY SUM(a.Value) DESC;
+END;
+GO
+GRANT EXECUTE ON dbo.ListLegacyMessages TO gameon_executor;
+GRANT EXECUTE ON dbo.SealLegacyMessage TO gameon_executor;
+GRANT EXECUTE ON dbo.AdminAnalytics TO gameon_executor;
+GRANT EXECUTE ON dbo.UpgradePasswordHash TO gameon_executor;

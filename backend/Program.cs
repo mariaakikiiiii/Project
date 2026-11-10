@@ -31,8 +31,8 @@ builder.Services.AddSingleton<ResetEmail>();
 builder.Services.AddHostedService<ResetDelivery>();
 builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210000);
 builder.Services.AddSingleton<AppSecrets>();
-builder.Services.AddSingleton<IPasswordHasher<string>, PepperedPasswordHasher>();
-builder.Services.AddSingleton<MessageCrypto>();
+builder.Services.AddSingleton<IPasswordHasher<string>, Argon2idPasswordHasher>();
+builder.Services.AddSingleton<LegacyMessageCrypto>();
 builder.Services.AddHostedService<MessageEncryptionBackfill>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o =>
 {
@@ -168,7 +168,7 @@ app.MapPost("/api/auth/login", async (Login input, HttpContext ctx, Database db,
         return Results.Json(new { error = "Invalid credentials." }, statusCode: 401);
     if (row["accountStatus"]?.ToString() != "Active")
         return Results.Json(new { error = "This account is suspended. Contact GameOn support if you think this is a mistake." }, statusCode: 403);
-    if (result == PasswordVerificationResult.SuccessRehashNeeded) // add the pepper / new parameters to an older hash
+    if (result == PasswordVerificationResult.SuccessRehashNeeded) // upgrade an older hash to Argon2id
         await db.Call("dbo.UpgradePasswordHash", ct, P("@UserId", SqlDbType.Int, Convert.ToInt32(row["userId"])),
             P("@OldHash", SqlDbType.NVarChar, row["passwordHash"]!.ToString(), 512), P("@NewHash", SqlDbType.NVarChar, hasher.HashPassword(email, input.Password), 512));
     await db.Call("dbo.RecordLogin", ct, P("@UserId", SqlDbType.Int, Convert.ToInt32(row["userId"])));

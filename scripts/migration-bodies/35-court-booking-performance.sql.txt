@@ -1,0 +1,25 @@
+-- Non-executable template. scripts/build-migration.py turns this into database/35-court-booking-performance.sql.
+-- Court bookings become the large core table for the performance study (data: database/perf-court-bookings-seed.sql).
+-- Adds the reporting index used by admin analytics and monthly revenue, and keeps synthetic venues out of venue search.
+USE GameOn;
+GO
+BEGIN TRANSACTION;
+CREATE INDEX IX_CB_Start ON dbo.CourtBookings(StartsAt) INCLUDE(CourtId,UserId,Status,Price);
+GO
+CREATE OR ALTER PROCEDURE dbo.SearchVenues @Query nvarchar(100)=NULL,@SubtypeId int=NULL AS
+BEGIN
+ SET NOCOUNT ON;
+ DECLARE @Term nvarchar(100)=TRIM(COALESCE(@Query,N''));
+ IF @SubtypeId IS NOT NULL AND NOT EXISTS(SELECT 1 FROM dbo.Subtypes WHERE SubtypeId=@SubtypeId) THROW 50002,'Unknown sport or activity.',1;
+ SELECT TOP(40) v.VenueId,v.Name,v.Area,v.Address,v.Latitude,v.Longitude,v.ContactPhoneNumber,v.IsVerified,v.ListingStatus,v.ReservationMode,v.WebsiteUrl,v.SourceName,v.SourceUrl,v.SourceCheckedOn,v.DirectoryNote,
+  CAST(CASE WHEN v.ListingStatus='Demo' THEN 1 ELSE 0 END AS bit) AS IsDemo,
+  CAST(CASE WHEN EXISTS(SELECT 1 FROM dbo.VenueSubtypes vs WHERE vs.VenueId=v.VenueId) THEN 1 ELSE 0 END AS bit) AS HasActivityDetails,
+  (SELECT STRING_AGG(s.Name,N', ') FROM dbo.VenueSubtypes vs JOIN dbo.Subtypes s ON s.SubtypeId=vs.SubtypeId WHERE vs.VenueId=v.VenueId) AS Activities
+ FROM dbo.Venues v
+ WHERE (v.DirectoryNote IS NULL OR (v.DirectoryNote NOT LIKE N'Host-chosen meeting point%' AND v.DirectoryNote NOT LIKE N'Synthetic performance data%'))
+ AND (@Term=N'' OR CHARINDEX(@Term COLLATE Latin1_General_100_CI_AI,v.Name COLLATE Latin1_General_100_CI_AI)>0
+  OR CHARINDEX(@Term COLLATE Latin1_General_100_CI_AI,v.Area COLLATE Latin1_General_100_CI_AI)>0 OR CHARINDEX(@Term COLLATE Latin1_General_100_CI_AI,v.Address COLLATE Latin1_General_100_CI_AI)>0)
+ AND (@SubtypeId IS NULL OR NOT EXISTS(SELECT 1 FROM dbo.VenueSubtypes vs WHERE vs.VenueId=v.VenueId)
+  OR EXISTS(SELECT 1 FROM dbo.VenueSubtypes vs WHERE vs.VenueId=v.VenueId AND vs.SubtypeId=@SubtypeId))
+ ORDER BY CASE v.ListingStatus WHEN 'Verified' THEN 0 WHEN 'Unverified' THEN 1 ELSE 2 END,v.Area,v.Name,v.VenueId;
+END;

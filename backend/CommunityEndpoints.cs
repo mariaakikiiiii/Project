@@ -183,13 +183,9 @@ public static class CommunityEndpoints
                 P("@OtherId", SqlDbType.Int, i.UserId), P("@Action", SqlDbType.VarChar, i.Action, 8)))[0][0]);
         }).RequireAuthorization().RequireRateLimiting("checkout");
 
-        app.MapGet("/api/chats", async (ClaimsPrincipal u, Database db, MessageCrypto crypto, CancellationToken ct) =>
-        {
-            var rows = (await db.Call("dbo.ListConversations", ct, P("@UserId", SqlDbType.Int, Id(u))))[0];
-            foreach (var r in rows) if (r["lastMessage"] is string m)
-            { var text = crypto.Decrypt(Convert.ToInt64(r["conversationId"]), m); r["lastMessage"] = text.Length > 80 ? text[..80] : text; }
-            return Results.Ok(rows);
-        }).RequireAuthorization();
+        // Messages are encrypted and decrypted inside SQL Server (certificate-protected AES-256 key, migration 34).
+        app.MapGet("/api/chats", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
+            Results.Ok((await db.Call("dbo.ListConversations", ct, P("@UserId", SqlDbType.Int, Id(u))))[0])).RequireAuthorization();
 
         app.MapPost("/api/chats", async (OpenChatInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
             i.Kind is not ("Direct" or "Game" or "Club") ? Bad("Unknown chat.") :
@@ -197,16 +193,16 @@ public static class CommunityEndpoints
                 P("@GameId", SqlDbType.Int, i.GameId), P("@ClubId", SqlDbType.Int, i.ClubId), P("@OtherUserId", SqlDbType.Int, i.UserId)))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
-        app.MapGet("/api/chats/{id:long}/messages", async (long id, long? beforeId, ClaimsPrincipal u, Database db, MessageCrypto crypto, CancellationToken ct) =>
-            Results.Ok(crypto.Open((await db.Call("dbo.GetMessages", ct, P("@ConversationId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)), P("@BeforeId", SqlDbType.BigInt, beforeId)))[0])))
+        app.MapGet("/api/chats/{id:long}/messages", async (long id, long? beforeId, ClaimsPrincipal u, Database db, CancellationToken ct) =>
+            Results.Ok((await db.Call("dbo.GetMessages", ct, P("@ConversationId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)), P("@BeforeId", SqlDbType.BigInt, beforeId)))[0]))
             .RequireAuthorization();
 
-        app.MapPost("/api/chats/{id:long}/messages", async (long id, MessageInput i, ClaimsPrincipal u, Database db, MessageCrypto crypto, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        app.MapPost("/api/chats/{id:long}/messages", async (long id, MessageInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
         {
             if (i.ClientKey == Guid.Empty || string.IsNullOrWhiteSpace(i.Body) || i.Body.Trim().Length > 1000) return Bad("Write a message (up to 1000 characters).");
-            // Encrypted here, so SQL Server never receives the message text.
-            var msg = crypto.Open((await db.Call("dbo.SendMessage", ct, P("@ConversationId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)),
-                P("@Body", SqlDbType.NVarChar, crypto.Encrypt(id, i.Body.Trim()), -1), P("@ClientKey", SqlDbType.UniqueIdentifier, i.ClientKey)))[0])[0];
+            // SendMessage encrypts with ENCRYPTBYKEY before the row is written (the connection itself uses TLS).
+            var msg = (await db.Call("dbo.SendMessage", ct, P("@ConversationId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)),
+                P("@Body", SqlDbType.NVarChar, i.Body.Trim(), 1000), P("@ClientKey", SqlDbType.UniqueIdentifier, i.ClientKey)))[0][0];
             // Push to every member's private user group (membership is computed in SQL, never by the client).
             var members = (await db.Call("dbo.ConversationMembers", ct, P("@ConversationId", SqlDbType.BigInt, id)))[0];
             await hub.Clients.Groups(members.Select(m => "user:" + m["userId"]).ToList()).SendAsync("message", msg, ct);

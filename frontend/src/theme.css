@@ -649,6 +649,14 @@ h1,h2 { letter-spacing: -.035em; }
 .kpi .pos { color: var(--positive); } .kpi .neg { color: var(--accent); }
 .bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding-top: 8px; }
 .bar { flex: 1; min-width: 4px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #facc15, #ff6b00); }
+.bar-labels { display: flex; gap: 3px; } .bar-labels span { flex: 1; min-width: 4px; text-align: center; font-size: 11px; color: var(--muted); overflow: hidden; }
+.analytics-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.hbars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hbars li { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+.hbars li i { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, #ff6b00, #facc15); min-width: 3px; }
+.hbars li b { font-variant-numeric: tabular-nums; font-size: 13px; }
+.hbars li em { grid-column: 2 / 4; }
+.kpi small { display: block; margin-top: 4px; }
 .segmented.tabs-4 { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 .access-panel .spots { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
 .access-panel .spots strong.open { color: var(--positive); } .access-panel .spots strong.full { color: var(--accent); }

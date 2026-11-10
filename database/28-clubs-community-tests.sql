@@ -159,10 +159,13 @@ INSERT @t VALUES('Only owner records expenses',@ok);
 DECLARE @G2 int;
 INSERT @ids EXEC dbo.CreateGame @HostUserId=@Own,@SportId=@Sport,@VenueId=@V,@StartsAt=@future,@Capacity=4; SELECT @G2=id FROM @ids; DELETE @ids;
 INSERT dbo.EventAttendance(GameId,UserId,HostMark,HostMarkedAt) VALUES(@G2,@P2,'Attended',SYSUTCDATETIME());
+EXEC dbo.EvaluateAttendance @G2;
 DECLARE @Before int=COALESCE((SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P2),0);
 INSERT @t SELECT 'Host mark alone earns nothing',IIF(COALESCE((SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P2),0)=@Before,1,0);
 UPDATE dbo.EventAttendance SET PlayerMark='Attended',PlayerMarkedAt=SYSUTCDATETIME() WHERE GameId=@G2 AND UserId=@P2;
 UPDATE dbo.EventAttendance SET PlayerMarkedAt=SYSUTCDATETIME() WHERE GameId=@G2 AND UserId=@P2;
+-- Migration 34: points are awarded by EvaluateAttendance (called by SubmitAttendance/ConfirmAttendance), not by a trigger.
+EXEC dbo.EvaluateAttendance @G2; EXEC dbo.EvaluateAttendance @G2;
 INSERT @t SELECT 'Both confirmations earn 50 points exactly once',IIF((SELECT Points FROM dbo.LoyaltyAccounts WHERE UserId=@P2)=@Before+50,1,0);
 INSERT @t SELECT 'Every points balance equals its ledger',IIF(NOT EXISTS(SELECT 1 FROM dbo.LoyaltyAccounts a WHERE a.Points<>(SELECT COALESCE(SUM(Points),0) FROM dbo.LoyaltyLedger l WHERE l.UserId=a.UserId)),1,0);
 SELECT Name, CASE WHEN Pass=1 THEN 'PASS' ELSE 'FAIL' END AS Result FROM @t;

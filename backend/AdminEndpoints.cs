@@ -45,6 +45,12 @@ public static class AdminEndpoints
             return Results.Ok(new { stats, settings });
         }).RequireAuthorization();
 
+        app.MapGet("/api/admin/analytics", async (int? months, ClaimsPrincipal u, Database db, CancellationToken ct) =>
+        {
+            var s = await db.Call("dbo.AdminAnalytics", ct, P("@AdminId", SqlDbType.Int, Id(u)), P("@Months", SqlDbType.Int, months ?? 12));
+            return Results.Ok(new { monthly = s[0], byAge = s[1], byGender = s[2], bySport = s[3], byHour = s[4], health = s[5][0], topClubs = s[6], minGroup = 5 });
+        }).RequireAuthorization();
+
         app.MapGet("/api/admin/users", async (string? q, string? status, ClaimsPrincipal u, Database db, CancellationToken ct) =>
         {
             if (q?.Length > 100 || status is not (null or "Active" or "Suspended" or "Deleted")) return Bad("Check the search.");
