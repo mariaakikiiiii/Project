@@ -9,7 +9,10 @@
    `Security:PasswordPepper` is required. `Security:MessageKey` is only needed once, to move messages that
    migration 33 encrypted into SQL Server encryption. **Back them up** privately (`dotnet user-secrets list --project backend`).
 2. In SSMS, with your Windows login, install in order: `database/33-security-hardening.sql`,
-   `database/34-db-hardening.sql`, `database/35-court-booking-performance.sql`. Then start the API.
+   `34-db-hardening.sql`, `35-court-booking-performance.sql`, `36-email-verification-group-chat.sql`,
+   `37-list-venue-subscriptions.sql`, `38-approve-joins.sql`, then take a **full backup**, then
+   `39-drop-payments-wallet.sql` (it refuses to run without a backup from the last 24 hours) and `40-remove-coaches.sql`.
+   Then start the API.
 3. **Back up the message-encryption certificate** (without it, a restored backup cannot decrypt chats).
    In SSMS, choose your own strong password and a folder SQL Server can write to:
    ```sql
@@ -27,7 +30,7 @@
 |---|---|
 | Passwords | **Argon2id** (19 MiB, 2 passes): a random 16-byte salt per password, stored inside the hash string (`$argon2id$v=19$m=19456,t=2,p=1$salt$hash`), so no salt column. The pepper from User Secrets is Argon2's secret input. Older hashes are upgraded at the next sign-in. |
 | Chat messages | Encrypted **by SQL Server**: AES-256 symmetric key `GameOnMessageKey`, protected by certificate `GameOnMessageCert`, protected by the database master key. `SendMessage` uses `ENCRYPTBYKEY`; reads use `DECRYPTBYKEYAUTOCERT`. The conversation id is the authenticator, so a ciphertext copied to another chat does not decrypt. A CHECK constraint refuses plain text. `gameon_api` cannot open the key itself: only the procedures (`EXECUTE AS OWNER`) can. |
-| Money | Moves only in stored procedures. Triggers only check (wallet balance = ledger sum, append-only ledger) or log. See `docs/KEY-TRANSACTIONS.md`. |
+| Money | Since migration 39 there is no wallet or deposit: players pay at the club. Club balances change only in `ClubLedgerPost` (row lock + ledger row in one transaction). No trigger moves money; the 3 remaining triggers only check or log. See `docs/KEY-TRANSACTIONS.md`. |
 | Network | HTTPS only. Without the LAN certificate the site stays on this PC. |
 | Database access | The API logs in as `gameon_api`, which can only EXECUTE stored procedures. All values are typed `SqlParameter`s. |
 | Sessions | HttpOnly, Secure, SameSite=Strict cookies; CSRF token on every change; rate limits; suspended users are signed out everywhere. |

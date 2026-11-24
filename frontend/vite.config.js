@@ -19,7 +19,9 @@ function devCertificate() {
   try { return readFileSync(pem); } catch { return undefined; }
 }
 const ca = devCertificate();
-const agent = ca ? new Agent({ ca, keepAlive: true }) : undefined;
+// servername pins TLS verification to the API's own certificate (localhost) while the browser's Host header is
+// still forwarded unchanged, e.g. a *.trycloudflare.com demo address that the live-chat origin check compares against.
+const agent = new Agent({ ...(ca ? { ca } : {}), keepAlive: true, servername: 'localhost' });
 
 // Network access: with the certificate from scripts/lan-cert.ps1, the site listens on ALL network addresses over HTTPS,
 // so phones and other PCs can use it. Without it, it stays on this PC only: plain HTTP from another device
@@ -33,7 +35,8 @@ export default defineConfig({
   server: {
     host: lan ? '0.0.0.0' : 'localhost',
     https: lan || undefined,
-    allowedHosts: [hostname().toLowerCase()], // IP addresses and localhost are always allowed
+    // IP addresses and localhost are always allowed; *.trycloudflare.com is the public demo tunnel (scripts/start-public.ps1).
+    allowedHosts: [hostname().toLowerCase(), '.trycloudflare.com'],
     proxy: {
       '/api': { target, secure: true, agent,
         configure: (proxy) => proxy.on('error', (err) => console.error(`[gameon] API proxy error: ${err.code || err.message}. Is the API running on ${target}?`)) },

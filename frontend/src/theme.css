@@ -544,8 +544,8 @@ h1,h2 { letter-spacing: -.035em; }
 .trust h2, .trust h3 { margin: 4px 0 8px; }
 .trust-facts { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
 .trust-facts li { padding-left: 22px; position: relative; line-height: 1.45; }
-.trust-facts li::before { content: "•"; position: absolute; left: 6px; color: var(--muted); }
-.trust-facts li.ok::before { content: "✓"; color: var(--positive); }
+.trust-facts li::before { content: "\2022"; position: absolute; left: 6px; color: var(--muted); }
+.trust-facts li.ok::before { content: "\2713"; color: var(--positive); }
 .trust-facts li.warn::before { content: "!"; color: var(--accent); font-weight: 700; }
 .venue-facts { display: grid; gap: 8px; margin: 10px 0; }
 .venue-facts div { display: grid; grid-template-columns: minmax(110px, 34%) 1fr; gap: 8px; }
@@ -704,7 +704,6 @@ h1,h2 { letter-spacing: -.035em; }
 
 /* Google map that follows the venue search */
 .venue-embed { width: 100%; height: clamp(320px, 55vh, 560px); border: 2px solid var(--green, #22c55e); border-radius: 20px; display: block; background: var(--surface); }
-.empty-coaches { display: grid; gap: 10px; }
 
 /* Admin */
 .announcement { padding: 10px 16px; text-align: center; font-weight: 700; color: #111; background: linear-gradient(135deg, #ff6b00, #facc15); }
@@ -719,3 +718,78 @@ h1,h2 { letter-spacing: -.035em; }
 
 /* Invisible marker used to scroll chat to the newest message: must not look like a bubble */
 .messages li.scroll-anchor { padding: 0; border: 0; background: none; min-height: 0; height: 1px; }
+
+/* Email verification banner */
+.verify-banner { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
+.verify-banner .success { color: var(--positive); font-style: normal; }
+.verify-banner .alert-inline { color: var(--accent); font-style: normal; }
+
+/* Chat: replies, reactions, actions, system notices */
+.messages li.msg { position: relative; }
+.messages li.msg.deleted p { font-style: italic; opacity: .7; }
+.messages li.system-note { align-self: center; max-width: 90%; background: none; border: 0; padding: 2px 0; text-align: center; }
+.messages li.system-note span { display: inline-block; font-size: 12px; color: var(--muted); background: var(--surface-raised); border-radius: 999px; padding: 4px 12px; }
+.reply-quote { margin: 4px 0 2px; padding: 4px 8px; border-left: 3px solid var(--accent); border-radius: 6px; background: #00000022; display: grid; font-size: 12px; }
+.messages li.mine .reply-quote { border-left-color: #111; background: #ffffff40; }
+.reply-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.reactions button { min-height: 0; padding: 2px 8px; font-size: 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-raised); color: var(--text); }
+.reactions button.mine { border-color: var(--accent); }
+.msg-actions { position: absolute; top: -14px; right: 8px; display: none; gap: 2px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+.messages li.mine .msg-actions { right: auto; left: 8px; }
+.messages li.msg:hover .msg-actions, .messages li.msg:focus-within .msg-actions { display: flex; }
+@media (hover: none) { .msg-actions { position: static; display: flex; width: fit-content; margin-top: 6px; } }
+.msg-actions button, .reaction-picker button { min-height: 0; min-width: 0; padding: 2px 8px; border: 0; background: none; color: var(--text); font-size: 15px; border-radius: 999px; cursor: pointer; }
+.msg-actions button:hover, .reaction-picker button:hover { background: var(--surface); }
+.reaction-picker { display: flex; gap: 2px; margin-top: 6px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 999px; padding: 2px; width: fit-content; }
+.reaction-picker button { font-size: 20px; }
+.composer-context { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--surface-raised); border-radius: 8px; }
+.composer-context span { display: grid; min-width: 0; }
+.composer-context small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger-text { color: #ef4444 !important; }
+
+/* ===== Subscriptions (migration 37) ===== */
+.subscriptions-page .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.plan { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--line); }
+.plan.current { border-color: var(--positive); }
+.plan.premium { border-color: #facc1566; background: linear-gradient(160deg, #facc1512, transparent 60%), var(--surface); }
+.plan.premium.current { border-color: #facc15; }
+.plan h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.plan-price { font-size: 2rem; font-weight: 800; margin: 0; }
+.plan-price small { font-size: .9rem; font-weight: 500; color: var(--muted); }
+.perk-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.perk-list li { position: relative; padding-left: 28px; }
+.perk-list li::before { content: "\2713"; position: absolute; left: 0; top: 0; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: .75rem; background: var(--positive-soft); color: var(--positive); font-weight: 700; }
+.perk-list li small { display: block; color: var(--muted); }
+.plan .full { width: 100%; }
+
+/* ===== List your venue ===== */
+.list-venue-page .lead { max-width: 60ch; }
+.fee-notice h3 { margin: 4px 0; }
+.fee-notice .checkbox { margin-top: 8px; font-weight: 600; color: var(--text); }
+.court-editor { border: 1px solid var(--line); display: grid; gap: 12px; }
+.court-editor legend { font-weight: 700; padding: 0 6px; }
+.price-rows { display: grid; gap: 8px; }
+.price-head { font-size: .85rem; color: var(--muted); font-weight: 600; }
+.price-row { display: grid; grid-template-columns: minmax(110px, 160px) minmax(100px, 160px) auto; gap: 8px; align-items: center; }
+.price-input { display: flex; align-items: center; gap: 6px; }
+.price-input input { width: 100%; }
+.danger-link { color: var(--accent); justify-self: start; }
+.my-venue .kpis { margin: 12px 0; }
+.price-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.duration-picker { border: 0; padding: 0; margin: 0 0 12px; }
+.duration-picker legend { font-weight: 600; margin-bottom: 8px; }
+.duration-picker .chip { padding: 0 14px; }
+.duration-picker .chip:disabled { opacity: .4; text-decoration: line-through; cursor: not-allowed; }
+@media (max-width: 520px) {
+  .price-row { grid-template-columns: 1fr 1fr; }
+  .price-row .text-link { grid-column: 1 / -1; justify-self: start; }
+  .price-chips { justify-content: flex-start; }
+}
+
+/* ===== Courts: Find your court / Find your venue ===== */
+.mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 20px; }
+.mode-switch button { text-align: left; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; display: grid; gap: 4px; }
+.mode-switch button small { color: var(--muted); font-size: .8rem; }
+.mode-switch button.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+@media (max-width: 520px) { .mode-switch { grid-template-columns: 1fr; } }

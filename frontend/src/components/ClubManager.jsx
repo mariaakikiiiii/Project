@@ -4,8 +4,8 @@ import { SlotGrid } from "./Courts";
 import { money, localTime, nextDays, localDate } from "./community";
 import { Requests, CheckIn, Products, Customers, Inventory, BackOffice, ClassRoster } from "./ClubSuite";
 
-// Club & coach side. Permissions are enforced in SQL; the UI only hides what a role can't use.
-const ROLE_RANK = { Owner: 4, Operator: 4, Manager: 3, Reception: 2, Coach: 1 };
+// Club side. Permissions are enforced in SQL; the UI only hides what a role can't use.
+const ROLE_RANK = { Owner: 4, Operator: 4, Manager: 3, Reception: 2 };
 
 function Schedule({ club, rank }) {
   const days = nextDays(14);
@@ -41,7 +41,7 @@ function Schedule({ club, rank }) {
       {sel && (sel.slotStatus === "Booked" || sel.slotStatus === "Mine") && (
         <div className="panel stack"><h3>{sel.court} · {localTime(sel.localStart)} · {sel.bookedBy}</h3><button className="secondary" onClick={cancelBooking}>Cancel this booking</button></div>)}
       {sel && sel.slotStatus === "Pending" && <p className="payment-note">This slot has a booking request waiting. Open the Requests tab to approve or decline it.</p>}
-      {data?.classes?.length > 0 && <div className="panel"><h3>Classes this day</h3><ul className="ledger">{data.classes.map((c) => <li key={c.classId}><span><strong>{c.title}</strong><small>{localTime(c.localStart)} · {c.registered}/{c.capacity}{c.coach ? ` · ${c.coach}` : ""}</small></span><button className="secondary" onClick={() => setRoster(c.classId)}>Attendance</button></li>)}</ul></div>}
+      {data?.classes?.length > 0 && <div className="panel"><h3>Classes this day</h3><ul className="ledger">{data.classes.map((c) => <li key={c.classId}><span><strong>{c.title}</strong><small>{localTime(c.localStart)} · {c.registered}/{c.capacity}</small></span><button className="secondary" onClick={() => setRoster(c.classId)}>Attendance</button></li>)}</ul></div>}
       {roster && <ClassRoster classId={roster} onClose={() => setRoster(null)} />}
     </section>
   );
@@ -79,14 +79,14 @@ function CourtsEditor({ club, lookups, courts, refresh }) {
 }
 
 function ClassesEditor({ club, lookups, courts, staff }) {
-  const [f, setF] = useState({ title: "", subtypeId: courts[0]?.subtypeId || lookups.sports[0]?.sportId, courtId: "", coachUserId: "", first: "", durationMinutes: 60, capacity: 8, price: 10, weeks: 4 });
+  const [f, setF] = useState({ title: "", subtypeId: courts[0]?.subtypeId || lookups.sports[0]?.sportId, courtId: "", first: "", durationMinutes: 60, capacity: 8, price: 10, weeks: 4 });
   const [msg, setMsg] = useState(""), [error, setError] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save(e) {
     e.preventDefault(); setMsg(""); setError("");
     try {
       // The time entered is Beirut local time; the browser converts it to UTC.
-      const r = await api(`/clubs/${club.clubId}/classes`, "POST", { title: f.title, subtypeId: Number(f.subtypeId), courtId: f.courtId ? Number(f.courtId) : null, coachUserId: f.coachUserId ? Number(f.coachUserId) : null,
+      const r = await api(`/clubs/${club.clubId}/classes`, "POST", { title: f.title, subtypeId: Number(f.subtypeId), courtId: f.courtId ? Number(f.courtId) : null,
         firstStartsAtUtc: new Date(f.first).toISOString(), durationMinutes: Number(f.durationMinutes), capacity: Number(f.capacity), price: Number(f.price), weeks: Number(f.weeks) });
       setMsg(`${r.created} weekly session(s) scheduled${f.courtId ? " and the court blocked for each" : ""}.`);
     } catch (err) { setError(err.message); }
@@ -97,7 +97,6 @@ function ClassesEditor({ club, lookups, courts, staff }) {
       <label className="form-wide">Title<input required maxLength={120} value={f.title} onChange={set("title")} placeholder="Padel for beginners" /></label>
       <label>Sport<select value={f.subtypeId} onChange={set("subtypeId")}>{lookups.sports.filter((s) => s.categorySlug === "sports").map((s) => <option key={s.sportId} value={s.sportId}>{s.name}</option>)}</select></label>
       <label>Court (reserves it)<select value={f.courtId} onChange={set("courtId")}><option value="">No court</option>{courts.map((c) => <option key={c.courtId} value={c.courtId}>{c.name}</option>)}</select></label>
-      <label>Coach<select value={f.coachUserId} onChange={set("coachUserId")}><option value="">None</option>{staff.map((s) => <option key={s.userId} value={s.userId}>{s.displayName} ({s.role})</option>)}</select></label>
       <label>First session<input type="datetime-local" required value={f.first} onChange={set("first")} /></label>
       <label>Duration (min)<input type="number" min="30" max="240" step="15" value={f.durationMinutes} onChange={set("durationMinutes")} /></label>
       <label>Capacity<input type="number" min="1" max="60" value={f.capacity} onChange={set("capacity")} /></label>
@@ -138,8 +137,8 @@ function Dashboard({ data, club, refresh, rank }) {
         </form>
         <div className="panel stack"><h3>Staff</h3>
           <ul className="ledger">{data.staff.map((m) => <li key={m.userId}><span><strong>{m.displayName}</strong><small>{m.email}</small></span><span className="button-row"><span className="pill">{m.role}</span>{m.role !== "Owner" && <button className="text-link" onClick={() => run(() => api(`/clubs/${club.clubId}/staff`, "POST", { email: m.email, role: null }))}>Remove</button>}</span></li>)}</ul>
-          <div className="picker-row"><input type="email" placeholder="Their GameOn email" value={staffEmail} onChange={(e) => setStaffEmail(e.target.value)} /><select value={role} onChange={(e) => setRole(e.target.value)}><option>Manager</option><option>Reception</option><option>Coach</option></select><button className="primary" onClick={() => run(() => api(`/clubs/${club.clubId}/staff`, "POST", { email: staffEmail, role }))}>Add</button></div>
-          <p className="muted small">Manager: courts, classes, dashboard. Reception: schedule, blocks, walk-ins, chat. Coach: their own classes.</p>
+          <div className="picker-row"><input type="email" placeholder="Their GameOn email" value={staffEmail} onChange={(e) => setStaffEmail(e.target.value)} /><select value={role} onChange={(e) => setRole(e.target.value)}><option>Manager</option><option>Reception</option></select><button className="primary" onClick={() => run(() => api(`/clubs/${club.clubId}/staff`, "POST", { email: staffEmail, role }))}>Add</button></div>
+          <p className="muted small">Manager: courts, classes, dashboard. Reception: schedule, blocks, walk-ins, chat.</p>
         </div>
       </>}
       {error && <p className="alert" role="alert">{error}</p>}
@@ -154,7 +153,7 @@ export default function ClubManager({ lookups }) {
   useEffect(() => { if (club && rank >= 3) api(`/clubs/${club.clubId}/dashboard`).then(setDash).catch((e) => setError(e.message)); }, [club, rank, v]);
   if (error) return <p className="alert" role="alert">{error}</p>;
   if (!mine) return <p className="muted">Loading…</p>;
-  if (!mine.length) return <section className="panel"><h1>Club manager</h1><p>You are not on the staff of a club yet.</p><p className="muted">Clubs join GameOn through a GameOn operator, who links the club to its venue and names the owner. The owner then adds managers, reception and coaches by email.</p></section>;
+  if (!mine.length) return <section className="panel"><h1>Club manager</h1><p>You are not on the staff of a club yet.</p><p className="muted">Clubs join GameOn through a GameOn operator, who links the club to its venue and names the owner. The owner then adds managers and reception by email. You can also list your own venue from Me → List your venue.</p></section>;
   const tabs = [["schedule", "Schedule", 1], ["requests", "Requests", 2], ["checkin", "Check-in", 2], ["courts", "Courts & prices", 3], ["classes", "Classes", 1], ["products", "Memberships", 3],
     ["customers", "Customers", 3], ["inventory", "Inventory", 2], ["dashboard", "Dashboard", 3], ["office", "Back office", 4]].filter((t) => rank >= t[2]);
   return (

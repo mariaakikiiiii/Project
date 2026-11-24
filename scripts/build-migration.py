@@ -20,7 +20,7 @@ MIGRATIONS = {
 """),
     25: dict(name='25-wallet', prior=22,
              title='GameOn wallet (ledger, Whish top-ups, $1 wallet deposits, instant wallet refunds, withdrawals).',
-             guard=""" IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name=N'CK__DepositBo__Payme__2057CCD0')
+             guard=""" IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.DepositBookings') AND name LIKE N'CK[_][_]DepositBo[_][_]Payme[_][_]%' AND definition=N'([PaymentMethod]=''WhishManual'' OR [PaymentMethod]=''Cash'')')
   THROW 50002,'The deposit payment-method constraint is not the expected one. Stop and report this message.',1;
 """),
     27: dict(name='27-clubs-community', prior=25,

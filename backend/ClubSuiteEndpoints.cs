@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using static Database;
 
 // Migration 29: wallet court payments, booking approval, club memberships & class packs (QR check-in),
@@ -13,6 +14,9 @@ public static class ClubSuiteEndpoints
     private static Microsoft.Data.SqlClient.SqlParameter Dec(string n, decimal? v, byte p = 10) => new(n, SqlDbType.Decimal) { Precision = p, Scale = 2, Value = (object?)v ?? DBNull.Value };
     private static bool Money(decimal v, decimal max = 500) => v > 0 && v <= max && decimal.Round(v, 2) == v;
     private static IResult Bad(string e) => Results.BadRequest(new { error = e });
+    // Group changes post a notice into the chat; members' open screens refresh on "chatChanged".
+    private static Task GroupChanged(Database db, IHubContext<LiveHub> hub, object? conversationId, CancellationToken ct) =>
+        conversationId is null ? Task.CompletedTask : CommunityEndpoints.PushToMembers(db, hub, Convert.ToInt64(conversationId), "chatChanged", new { conversationId }, ct);
     private static async Task<IResult> Row(Task<List<List<Dictionary<string, object?>>>> call) => Results.Ok((await call)[0].FirstOrDefault());
 
     public static void MapClubSuite(this WebApplication app)
@@ -97,9 +101,6 @@ public static class ClubSuiteEndpoints
             Row(db.Call("dbo.AddStaffPay", ct, P("@ClubId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, i.UserId),
                 P("@PeriodMonth", SqlDbType.Date, i.Month.ToDateTime(TimeOnly.MinValue)), Dec("@Salary", i.Salary), P("@Note", SqlDbType.NVarChar, i.Note, 120))))
             .RequireAuthorization().RequireRateLimiting("checkout");
-        app.MapPut("/api/clubs/{id:int}/staff/{userId:int}/commission", (int id, int userId, CommissionInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-            Row(db.Call("dbo.SetStaffCommission", ct, P("@ClubId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, userId), P("@CommissionPct", SqlDbType.TinyInt, i.CommissionPct))))
-            .RequireAuthorization().RequireRateLimiting("checkout");
         app.MapGet("/api/operator/club-balances", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
             Results.Ok((await db.Call("dbo.ListClubBalances", ct, P("@OperatorId", SqlDbType.Int, Id(u))))[0])).RequireAuthorization();
         app.MapPost("/api/operator/clubs/{id:int}/payouts", (int id, PayoutInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
@@ -110,13 +111,42 @@ public static class ClubSuiteEndpoints
         // ---------- Player groups ----------
         app.MapGet("/api/me/groups", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
             Results.Ok((await db.Call("dbo.ListMyGroups", ct, P("@UserId", SqlDbType.Int, Id(u))))[0])).RequireAuthorization();
-        app.MapPost("/api/me/groups", (GroupInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-            string.IsNullOrWhiteSpace(i.Name) || i.Name.Length > 60 || i.MemberIds is not { Length: <= 30 } ? Task.FromResult(Bad("Name the group and choose up to 30 friends.")) :
-            Row(db.Call("dbo.CreatePlayerGroup", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Name", SqlDbType.NVarChar, i.Name.Trim(), 60), P("@MembersJson", SqlDbType.NVarChar, JsonSerializer.Serialize(i.MemberIds.Distinct()), 1000))))
-            .RequireAuthorization().RequireRateLimiting("checkout");
-        app.MapPost("/api/groups/{id:int}/members", (int id, GroupMemberInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-            Row(db.Call("dbo.UpdateGroupMember", ct, P("@GroupId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, i.UserId), P("@Add", SqlDbType.Bit, i.Add))))
-            .RequireAuthorization().RequireRateLimiting("checkout");
+        app.MapPost("/api/me/groups", async (GroupInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(i.Name) || i.Name.Trim().Length > 60 || i.Description?.Length > 300 || i.MemberIds is not { Length: <= 49 })
+                return Bad("Name the group (up to 60 characters) and choose up to 49 friends.");
+            var row = (await db.Call("dbo.CreatePlayerGroup", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Name", SqlDbType.NVarChar, i.Name.Trim(), 60),
+                P("@MembersJson", SqlDbType.NVarChar, JsonSerializer.Serialize(i.MemberIds.Distinct()), 1000), P("@Description", SqlDbType.NVarChar, i.Description, 300)))[0][0];
+            await GroupChanged(db, hub, row["conversationId"], ct);
+            return Results.Ok(row);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
+        app.MapGet("/api/groups/{id:int}", async (int id, ClaimsPrincipal u, Database db, CancellationToken ct) =>
+        {
+            var sets = await db.Call("dbo.GetGroupDetails", ct, P("@GroupId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, Id(u)));
+            return Results.Ok(new { group = sets[0][0], members = sets[1] });
+        }).RequireAuthorization();
+        app.MapPut("/api/groups/{id:int}", async (int id, GroupInfoInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(i.Name) || i.Name.Trim().Length > 60 || i.Description?.Length > 300) return Bad("Use a name up to 60 characters and a description up to 300.");
+            var row = (await db.Call("dbo.UpdateGroupInfo", ct, P("@GroupId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)),
+                P("@Name", SqlDbType.NVarChar, i.Name.Trim(), 60), P("@Description", SqlDbType.NVarChar, i.Description, 300)))[0][0];
+            await GroupChanged(db, hub, row["conversationId"], ct);
+            return Results.Ok(row);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
+        app.MapPost("/api/groups/{id:int}/members", async (int id, GroupMemberInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            var row = (await db.Call("dbo.UpdateGroupMember", ct, P("@GroupId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, i.UserId), P("@Add", SqlDbType.Bit, i.Add)))[0][0];
+            await GroupChanged(db, hub, row["conversationId"], ct);
+            if (!i.Add) await hub.Clients.Group("user:" + i.UserId).SendAsync("chatChanged", new { conversationId = row["conversationId"] }, ct);
+            return Results.Ok(row);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
+        app.MapPost("/api/groups/{id:int}/role", async (int id, GroupRoleInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            if (i.Role is not ("Admin" or "Member")) return Bad("Choose Admin or Member.");
+            var row = (await db.Call("dbo.SetGroupRole", ct, P("@GroupId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, i.UserId), P("@Role", SqlDbType.VarChar, i.Role, 8)))[0][0];
+            await GroupChanged(db, hub, row["conversationId"], ct);
+            return Results.Ok(row);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
         app.MapPost("/api/games/{id:int}/invite-group", (int id, InviteGroupInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
             Row(db.Call("dbo.InviteGroupToGame", ct, P("@GameId", SqlDbType.Int, id), P("@HostUserId", SqlDbType.Int, Id(u)), P("@GroupId", SqlDbType.Int, i.GroupId))))
             .RequireAuthorization().RequireRateLimiting("checkout");
@@ -268,9 +298,10 @@ public sealed record BroadcastInput(string Title, string Body);
 public sealed record ItemInput(int? ItemId, string Name, string? Unit, int ReorderLevel, decimal? UnitPrice);
 public sealed record StockInput(int Delta, string Reason, string? Note = null);
 public sealed record PayInput(int UserId, DateOnly Month, decimal Salary, string? Note = null);
-public sealed record CommissionInput(byte CommissionPct);
 public sealed record PayoutInput(decimal Amount, string Reference);
-public sealed record GroupInput(string Name, int[] MemberIds);
+public sealed record GroupInput(string Name, int[] MemberIds, string? Description = null);
+public sealed record GroupInfoInput(string Name, string? Description);
+public sealed record GroupRoleInput(int UserId, string Role);
 public sealed record GroupMemberInput(int UserId, bool Add);
 public sealed record InviteGroupInput(int GroupId);
 public sealed record ShotActionInput(string Action, string? Reason = null);

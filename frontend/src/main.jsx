@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, refreshCsrf } from "./api";
+import { VerifyBanner, VerifyLinkPrompt } from "./components/VerifyEmail";
 import {
   dateOf,
   localInput,
@@ -12,20 +13,16 @@ import {
 import {protectedPages, pageLabels, routeHref, readRoute, inviteFor} from "./navigation";
 import "./style.css";
 import "./theme.css";
-import DepositCheckout from "./components/DepositCheckout";
 import VenueContactCard from "./components/VenueContactCard";
-import DepositHistory from "./components/DepositHistory";
-import CheckoutModal from "./components/CheckoutModal";
 import SponsoredVenues from "./components/SponsoredVenues";
 import VenueMap from "./components/VenueMap";
-import PaymentHistory from "./components/PaymentHistory";
 import CategoryTabs from "./components/CategoryTabs";
 import GameForm from "./components/EventWizard";
 import SportsPicker,{genderOptions,todayInput} from "./components/SportsPicker";
 import VenueDirectory from "./components/VenueDirectory";
-import GameTrust from "./components/GameTrust";
 import { MiniMap } from "./components/LocationPicker";
-import Wallet from "./components/Wallet";
+import Subscriptions from "./components/Subscriptions";
+import ListVenue from "./components/ListVenue";
 import Courts from "./components/Courts";
 import ClubManager from "./components/ClubManager";
 import Chat, { stopLive } from "./components/Chat";
@@ -39,7 +36,8 @@ function Mark({ name }) {
   const paths = {
     arrow: "M7 17 17 7M7 7h10v10",
     pin: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
-    payments: "M3 7h18v14H3zM3 7V4h15v3M16 12h5v5h-5z",
+    subscriptions: "m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7Z",
+    listvenue: "M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6",
     back: "M19 12H5m6-6-6 6 6 6",
     check: "m5 12 4 4L19 6",
     discover: "m3 11 9-8 9 8v10h-6v-6H9v6H3Z",
@@ -47,7 +45,6 @@ function Mark({ name }) {
     inbox: "M18 8a6 6 0 0 0-12 0c0 8-3 8-3 10h18c0-2-3-2-3-10M10 21h4",
     courts: "M3 4h18v16H3zM12 4v16M3 12h18",
     chat: "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z",
-    wallet: "M3 7h15a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H3zM3 7V5a2 2 0 0 1 2-2h11v4M16 14h2",
     profile: "M20 21a8 8 0 0 0-16 0M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
     host: "M12 5v14M5 12h14",
     venues: "M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
@@ -404,8 +401,6 @@ function Feed({ lookups, user, select, navigate, revision, config }) {
 function Details({ id, user, config, select, navigate, lookups, notify }) {
   const [version, setVersion] = useState(0),
     [busy, setBusy] = useState(false),
-    [checkoutOpen, setCheckoutOpen] = useState(false),
-    [depositCovered, setDepositCovered] = useState(false),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(false),
     [confirmCancel, setConfirmCancel] = useState(false);
@@ -459,22 +454,8 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
       />
     );
   const query = mapQuery(g);
-  const BookingCheckout = g.requiresDeposit ? DepositCheckout : CheckoutModal;
   return (
     <>
-      {checkoutOpen && (
-        <BookingCheckout
-          covered={depositCovered}
-          game={g}
-          config={config}
-          onClose={() => { setCheckoutOpen(false); setVersion(v => v + 1); }}
-          onComplete={(message) => {
-            setCheckoutOpen(false);
-            setVersion((v) => v + 1);
-            notify(message);
-          }}
-        />
-      )}
       <button className="text-link back" onClick={() => navigate("discover")}>
         ← Back to games
       </button>
@@ -484,7 +465,6 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
           <span className="overline">
             {g.categoryName} · {g.sport.toUpperCase()} · {g.area.toUpperCase()}
           </span>
-          {g.depositBookingStatus === "CONFIRMED_DEPOSIT_LOCKED" && <span className="pill">Full crew · deposits locked</span>}
           <h1>
             {g.sport} at {g.venue}
           </h1>
@@ -551,7 +531,6 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                           ? "Playing with a host-covered place"
                           : "Ready to play"}
                     </small>
-                    {g.requiresDeposit && p.userId !== g.hostUserId && <span className={`pill ${p.depositStatus === "PAID_HELD" ? "" : "danger"}`}>{p.depositStatus === "PAID_HELD" ? (g.gameStatus === "Cancelled" ? "Deposit Verified · refund review" : "Deposit Verified · Spot Reserved") : p.depositStatus === "REFUNDED" ? (g.gameStatus === "Cancelled" ? "Deposit Refunded" : "Deposit Refunded · Spot Reserved") : p.depositStatus === "FORFEITED" ? "Deposit Forfeited" : "Deposit Pending"}</span>}
                   </div>
                 </li>
               ))}
@@ -559,7 +538,6 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
           </section>
           <GameAccess id={id} user={user} game={g} isHost={host} isMember={member} invite={inviteFor(id)} notify={notify} onChange={() => setVersion((v) => v + 1)}/>
           <VenueContactCard game={g}/>
-          <GameTrust id={id} user={user} game={g} roster={data.roster} notify={notify}/>
           <section className="panel">
             <div className="section-heading">
               <h2>Meet you here</h2>
@@ -626,14 +604,14 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     className="primary full"
                     disabled={busy || !playable(g)}
                     onClick={() =>
-                      g.requiresDeposit ? (setDepositCovered(true), setCheckoutOpen(true)) : act(
+                      act(
                         "/sponsored-place",
                         "POST",
                         "You are in! The host covers your venue fee.",
                       )
                     }
                   >
-                    {g.requiresDeposit ? "Claim host-covered share" : "Claim a free place ↗"}
+                    Claim a free place ↗
                   </button>
                 )}
               </div>
@@ -643,30 +621,21 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
               left · {g.playerCount} already in
             </p>
             <Alert>{error}</Alert>
-            {g.requiresDeposit && <p className="payment-note">A $1 commitment deposit applies to players, including host-covered shares. The host is exempt. Your spot is reserved only after an operator verifies the transfer.</p>}
             {data.membership && (
               <p className="membership-status" role="status">
                 {queued
                   ? `Waitlisted · position #${data.membership.queuePosition}`
                   : "Your place is confirmed"}
-                {data.membership.paymentMethod === "Cash"
-                  ? " · cash at venue"
-                  : data.membership.paymentMethod === "WhishMock"
-                    ? " · DEMO Whish — no real charge"
-                    : data.membership.paymentMethod === "WhishManual" ? " · Whish transfer — check Payments for status"
-                    : ""}
+                {Number(g.costPerPlayer) > 0 && !sponsoredMember ? " · pay your share to the host at the venue" : ""}
               </p>
             )}
-            {Number(g.costPerPlayer) > 0 && !sponsoredMember && (
+            {Number(g.costPerPlayer) > 0 && !sponsoredMember && !data.membership && (
               <p className="muted">
-                A 5% platform service fee applies when you get a place. Review
-                the exact total at checkout.
+                No payment in the app. Pay your share to the host at the venue.
               </p>
             )}
             {sponsoredMember && (
-              <p className="muted">
-                {g.requiresDeposit ? "Your host covers the venue share. The $1 commitment deposit still applies." : "Your host-covered place is free, with no platform fee."}
-              </p>
+              <p className="muted">Your host-covered place is free.</p>
             )}
             {playable(g) ? (
               <>
@@ -677,15 +646,13 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     onClick={() =>
                       !user
                         ? navigate("auth")
-                        : Number(g.costPerPlayer) > 0 || g.requiresDeposit
-                          ? (setDepositCovered(false), setCheckoutOpen(true))
-                          : act(
-                              "/join",
-                              "POST",
-                              g.playerCount >= g.capacity
-                                ? "You are on the waitlist."
-                                : "Your place is confirmed.",
-                            )
+                        : act(
+                            "/join",
+                            "POST",
+                            g.playerCount >= g.capacity
+                              ? "You are on the waitlist."
+                              : "Your place is confirmed.",
+                          )
                     }
                   >
                     {busy
@@ -712,7 +679,6 @@ function Details({ id, user, config, select, navigate, lookups, notify }) {
                     Leave game / waitlist
                   </button>
                 )}
-                {queued && g.requiresDeposit && g.playerCount < g.capacity && <button className="primary full" onClick={() => {setDepositCovered(false);setCheckoutOpen(true);}}>Verify deposit to reserve this opening</button>}
                 <button
                   className="text-link full"
                   onClick={() => navigate("mine")}
@@ -825,7 +791,7 @@ function MyGames({ user, select }) {
     </>
   );
 }
-function Profile({ lookups, onSaved, onPayments }) {
+function Profile({ lookups, onSaved }) {
   const { data, error, loading } = useResource("/me/profile");
   const [chosenSports,setChosenSports] = useState(null);
   const [saving, setSaving] = useState(false),
@@ -860,7 +826,6 @@ function Profile({ lookups, onSaved, onPayments }) {
     <div className="form-page">
       <span className="overline">MORE YOU. BETTER GAMES.</span>
       <h1>My profile</h1>
-      <button className="secondary" onClick={onPayments}>Payments & deposits</button>
       <p className="lead">
         Your favorite sports and neighborhood shape what you see
         when you sign in.
@@ -989,41 +954,6 @@ function Inbox({ notifications, select, refresh }) {
           place opens.
         </Empty>
       )}
-    </div>
-  );
-}
-function Payments({ config, user }) {
-  return (
-    <div className="form-page">
-      <span className="overline">YOUR PLAN. YOUR PAYMENT CHOICE.</span>
-      <h1>Payments</h1>
-      <p className="lead">
-        Prices are shown in USD or LBP before you reserve. No currency
-        conversion is performed.
-      </p>
-      <section className="panel">
-        <h2>Cash or Whish</h2>
-        <p><strong>Cash in person</strong> — pay the host at the venue.</p>
-        <p><strong>Whish Money transfer</strong> — {config.manualWhishAvailable ? `choose Whish when booking, then follow the instructions to send to ${config.manualWhishRecipient}. GameOn checks transfers manually.` : "not currently available."}</p>
-        <p>
-          Cash is settled in person with the host. A host-covered place means
-          your host pays your venue share.
-        </p>
-        <div className="offer">
-          <h3>Whish Pay demo checkout</h3>
-          <p>
-            {config.mockPaymentsAvailable
-              ? "Try the clearly labeled mock Whish option in a priced event’s checkout. It simulates verification and transfers no real money."
-              : "Mock Whish checkout is unavailable in this environment."}
-            Automated Whish merchant checkout remains unconnected. Manual transfers
-            are separate; a demo is never a real payment receipt.
-          </p>
-          <p>
-            GameOn does not collect your Whish password, PIN, or one-time codes.
-          </p>
-        </div>
-      </section>
-      {user && <><DepositHistory/><PaymentHistory/></>}
     </div>
   );
 }
@@ -1336,7 +1266,7 @@ function App() {
       notify(e.message);
     }
   }
-  const links = user ? [["discover","Discover"],["courts","Courts"],["mine","My games"],["chat","Chat"],["profile","Me"]] : [["discover","Discover"],["courts","Courts"],["venues","Venues"]];
+  const links = user ? [["discover","Discover"],["courts","Courts"],["mine","My games"],["chat","Chat"],["subscriptions","Subscriptions"],["profile","Me"]] : [["discover","Discover"],["courts","Courts"],["subscriptions","Subscriptions"]];
   return (
     <>
       <a className="skip" href="#main" onClick={e => {e.preventDefault();document.getElementById("main")?.focus();}}>
@@ -1355,8 +1285,8 @@ function App() {
             <a
               key={key}
               href={routeHref(key)}
-              aria-current={page === key ? "page" : undefined}
-              className={page === key ? "active" : ""}
+              aria-current={page === key || (key === "courts" && page === "venues") ? "page" : undefined}
+              className={page === key || (key === "courts" && page === "venues") ? "active" : ""}
               onClick={e => {if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {e.preventDefault();navigate(key);}}}
             >
               <Mark name={key === "mine" ? "games" : key} />
@@ -1394,6 +1324,8 @@ function App() {
         </div>
       </header>
       {config?.announcement && <div className="announcement" role="status">{config.announcement}</div>}
+      <VerifyLinkPrompt onDone={(ok, message) => { notify(message); if (ok) api("/auth/me").then(setUser).catch(() => {}); }} />
+      <VerifyBanner user={user} onRefresh={() => api("/auth/me").then(setUser).catch(() => {})} />
       <main id="main" tabIndex={-1}>
         <Alert>{error}</Alert>
         {!authReady ? (
@@ -1410,7 +1342,7 @@ function App() {
                 revision={revision}
               />
             )}
-            {page === "venues" && <VenueDirectory lookups={lookups} config={config} user={user}/>}
+            {page === "venues" && <Courts lookups={lookups} user={user} config={config} mode="venue" navigate={navigate} />}
             {page === "details" && (
               <Details
                 key={selected}
@@ -1439,7 +1371,6 @@ function App() {
             {page === "profile" && user && (
               <AccountHub user={user} lookups={lookups} unread={notifications?.unreadCount} navigate={navigate}><Profile
                 lookups={lookups}
-                onPayments={()=>navigate("payments")}
                 onSaved={(name) => {
                   setUser({ ...user, name });
                   setRevision((v) => v + 1);
@@ -1455,9 +1386,9 @@ function App() {
                 refresh={refreshInbox}
               />
             )}{" "}
-            {page === "payments" && user && <Payments config={config} user={user} />}
-            {page === "wallet" && user && <Wallet config={config} />}
-            {page === "courts" && <Courts lookups={lookups} user={user} />}
+            {page === "subscriptions" && <Subscriptions user={user} config={config} navigate={navigate} notify={notify} />}
+            {page === "listvenue" && user && <ListVenue lookups={lookups} config={config} navigate={navigate} notify={notify} />}
+            {page === "courts" && <Courts lookups={lookups} user={user} config={config} mode="court" navigate={navigate} />}
             {page === "chat" && user && <Chat user={user} lookups={lookups} shotsEnabled={config?.shotsEnabled !== false} />}
             {page === "passes" && user && <Passes />}
             {page === "admin" && user && <Admin user={user} />}
@@ -1491,9 +1422,9 @@ function App() {
           <i />
         </button>
         <p>A little less online. A lot more on court.</p>
-        {user && <button className="text-link" onClick={() => navigate("payments")}>
-          Payments & deposits ↗
-        </button>}
+        <button className="text-link" onClick={() => navigate(user ? "listvenue" : "auth")}>
+          Own a venue? List your courts ↗
+        </button>
         <span>Made for the way Lebanon plays.</span>
       </footer>
       {toast && (

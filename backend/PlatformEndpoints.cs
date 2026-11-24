@@ -12,7 +12,7 @@ public static class PlatformEndpoints
     private static int Id(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
     public static void MapPlatform(this WebApplication app)
     {
-        app.MapGet("/api/config", async (IConfiguration config, ResetEmail email, GameOn.Payments.IWhishGateway whish, GameOn.Payments.MockPaymentSecurity mock, PlatformSettings settings, CancellationToken ct) => Results.Ok(new
+        app.MapGet("/api/config", async (IConfiguration config, ResetEmail email, PlatformSettings settings, CancellationToken ct) => Results.Ok(new
         {
             mapsEmbedApiKey = config["Maps:EmbedApiKey"] ?? "",
             mapsBrowserApiKey = config["Maps:BrowserApiKey"] ?? "",
@@ -23,15 +23,9 @@ public static class PlatformEndpoints
             shotsEnabled = await settings.Flag("ShotsEnabled", ct),
             mapsPickerAvailable = true,
             mapProvider = string.IsNullOrWhiteSpace(config["Maps:BrowserApiKey"]) ? "osm" : "google",
-            walletAvailable = config.GetValue<bool>("Payments:ManualWhishEnabled"),
-            manualWhishAvailable = config.GetValue<bool>("Payments:ManualWhishEnabled"),
-            manualWhishRecipient = config.GetValue<bool>("Payments:ManualWhishEnabled") ? config["Payments:ManualWhishRecipient"] : null,
-            passwordResetAvailable = email.Enabled,
-            onlinePaymentsAvailable = whish.IsAvailable,
-            payoutAvailable = false,
-            mockPaymentsAvailable = mock.Enabled,
-            serviceFeeRate = GameOn.Payments.BookingFees.Rate,
-            paymentMethods = new[] { new { code = "Cash", name = "Cash at the venue", available = true }, new { code = "Whish", name = "Whish Money", available = whish.IsAvailable } },
+            passwordResetAvailable = email.CanDeliver,
+            venueCommissionPct = 10,
+            premiumPrice = await settings.ProPrice(ct),
             currencies = new[] { "USD", "LBP" },
             country = "LB"
         }));
@@ -87,7 +81,7 @@ public static class PlatformEndpoints
         }).RequireAuthorization();
         app.MapPost("/api/auth/forgot-password", async (ForgotInput input, Database db, ResetEmail email, IDataProtectionProvider protection, CancellationToken ct) =>
         {
-            if (!email.Enabled) return Results.Json(new { error = "Password recovery email is not available yet. Contact the organizer." }, statusCode: 503);
+            if (!email.CanDeliver) return Results.Json(new { error = "Password recovery email is not available yet. Contact the organizer." }, statusCode: 503);
             if (!System.Net.Mail.MailAddress.TryCreate(input.Email?.Trim(), out var address) || address.Address.Length > 254)
                 return Results.BadRequest(new { error = "Enter a valid email address." });
             var normalized = address.Address.ToLowerInvariant();

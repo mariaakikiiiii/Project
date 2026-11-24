@@ -18,9 +18,9 @@ export function Requests({ club, courts, rank, onChange }) {
     <section className="stack">
       <Err e={error || err} />
       {!list ? <p className="muted">Loading…</p> : list.length === 0 ? <p className="muted">No booking requests waiting.</p> :
-        <ul className="ledger">{list.map((b) => <li key={b.bookingId}><span><strong>{b.player} · {b.court}</strong><small>{localDate(b.localStart)} {localTime(b.localStart)} · {money(b.price)}{b.paidFromWallet ? " paid in-app" : " at the club"} · {b.previousBookings} past bookings here</small></span>
+        <ul className="ledger">{list.map((b) => <li key={b.bookingId}><span><strong>{b.player} · {b.court}</strong><small>{localDate(b.localStart)} {localTime(b.localStart)} · {money(b.price)}{" at the club"}{b.freeWater ? " · free water (Premium)" : ""} · {b.previousBookings} past bookings here</small></span>
           <span className="button-row"><button className="primary" onClick={() => decide(b, true)}>Approve</button><button className="text-link" onClick={() => decide(b, false)}>Decline</button></span></li>)}</ul>}
-      {rank >= 3 && courts?.length > 0 && <div className="panel stack"><h3>Which courts need your approval?</h3><p className="muted small">Off: players book instantly. On: each booking waits for staff to approve. Wallet payments are refunded if you decline.</p>
+      {rank >= 3 && courts?.length > 0 && <div className="panel stack"><h3>Which courts need your approval?</h3><p className="muted small">Off: players book instantly. On: each booking waits for staff to approve.</p>
         {courts.map((c) => <label className="checkbox" key={c.courtId}><input type="checkbox" checked={!!c.requiresApproval} onChange={() => toggle(c)} />{c.name}</label>)}</div>}
     </section>
   );
@@ -74,7 +74,7 @@ export function Products({ club }) {
           <label className="checkbox"><input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />On sale</label>
           <div className="form-wide button-row"><button className="primary">Save</button><button type="button" className="secondary" onClick={() => setF(null)}>Cancel</button></div>
         </form>)}
-      <p className="muted small">Players pay from their GameOn wallet. The money is added to your club balance and paid out by GameOn.</p>
+      <p className="muted small">Players take a membership or pack in the app and pay you in person.</p>
     </section>
   );
 }
@@ -130,19 +130,14 @@ export function BackOffice({ club }) {
   return (
     <section className="stack">
       <Err e={err} />{msg && <p className="success" role="status">{msg}</p>}
-      <div className="kpis"><div className="kpi"><span>Held by GameOn for your club</span><strong>{money(data.balance.balance)}</strong><small>From in-app payments · {money(data.balance.paidOut)} paid out so far</small></div></div>
-      <form className="panel form-grid" onSubmit={(e) => { e.preventDefault(); run(() => api(`/clubs/${club.clubId}/payroll`, "POST", { userId: Number(pay.userId), month: pay.month + "-01", salary: Number(pay.salary) }), (r) => `Payroll recorded: ${money(r.total)} (commission ${money(r.commission)}). Added to expenses.`); }}>
+      <form className="panel form-grid" onSubmit={(e) => { e.preventDefault(); run(() => api(`/clubs/${club.clubId}/payroll`, "POST", { userId: Number(pay.userId), month: pay.month + "-01", salary: Number(pay.salary) }), (r) => `Payroll recorded: ${money(r.total)}. Added to expenses.`); }}>
         <h3 className="form-wide">Payroll</h3>
         <label>Staff<select required value={pay.userId} onChange={(e) => setPay({ ...pay, userId: e.target.value })}><option value="">Choose…</option>{data.staff.filter((s) => s.role !== "Owner").map((s) => <option key={s.userId} value={s.userId}>{s.displayName} ({s.role})</option>)}</select></label>
         <label>Month<input type="month" required value={pay.month} onChange={(e) => setPay({ ...pay, month: e.target.value })} /></label>
         <label>Salary ($)<input type="number" min="0" step="0.01" required value={pay.salary} onChange={(e) => setPay({ ...pay, salary: e.target.value })} /></label>
         <div className="form-wide"><button className="primary">Record pay</button></div>
-        <p className="muted small form-wide">Coach commission is added automatically from their classes that month.</p>
       </form>
-      <div className="panel"><h3>Coach commission</h3><ul className="ledger">{data.staff.filter((s) => s.role === "Coach").map((s) => <li key={s.userId}><span>{s.displayName}</span>
-        <span className="button-row"><input type="number" min="0" max="50" defaultValue={s.commissionPct} aria-label={`Commission for ${s.displayName}`} style={{ width: 80 }} onBlur={(e) => Number(e.target.value) !== s.commissionPct && run(() => api(`/clubs/${club.clubId}/staff/${s.userId}/commission`, "PUT", { commissionPct: Number(e.target.value) }), () => "Commission saved.")} />%</span></li>)}</ul>
-        {!data.staff.some((s) => s.role === "Coach") && <p className="muted">Add coaches in Dashboard → Staff.</p>}</div>
-      {data.payroll.length > 0 && <div className="panel"><h3>Pay history</h3><ul className="ledger">{data.payroll.map((p) => <li key={p.payId}><span>{p.displayName}<small>{String(p.periodMonth).slice(0, 7)}</small></span><span>{money(p.salary)} + {money(p.commission)}</span></li>)}</ul></div>}
+      {data.payroll.length > 0 && <div className="panel"><h3>Pay history</h3><ul className="ledger">{data.payroll.map((p) => <li key={p.payId}><span>{p.displayName}<small>{String(p.periodMonth).slice(0, 7)}</small></span><span>{money(p.salary)}</span></li>)}</ul></div>}
       <div className="panel"><h3>Staff activity</h3><ul className="ledger">{data.activity.map((a) => <li key={a.activityId}><span><strong>{a.displayName}</strong><small>{a.action}{a.detail ? ` · ${a.detail}` : ""}</small></span><small>{new Date(a.at + "Z").toLocaleString()}</small></li>)}</ul></div>
       <div className="panel"><h3>Club balance history</h3><ul className="ledger">{data.ledger.map((l) => <li key={l.entryId}><span>{l.kind}{l.reference ? ` · ${l.reference}` : ""}<small>{new Date(l.createdAt + "Z").toLocaleString()}</small></span><span className={l.amount > 0 ? "amount plus" : "amount minus"}>{money(l.amount)}</span></li>)}</ul></div>
     </section>

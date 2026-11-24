@@ -7,8 +7,7 @@ function Overview({ data }) {
   const s = data.stats;
   const tiles = [["Active players", s.activeUsers], ["New this week", s.newUsers7d], ["Signed in this week", s.activeLast7d], ["Suspended", s.suspendedUsers],
     ["Upcoming games", s.upcomingGames], ["Upcoming court bookings", s.upcomingCourtBookings], ["Clubs", s.clubs],
-    ["Money in player wallets", money(s.walletMoneyHeld)], ["Money held for clubs", money(s.clubMoneyHeld)],
-    ["Top-ups to check", s.topUpsToCheck], ["Open disputes", s.openDisputes], ["Reported photos", s.reportedShots]];
+    ["Venues listed by owners", s.selfListedVenues], ["Premium members", s.premiumMembers], ["Reported photos", s.reportedShots]];
   return <div className="kpis">{tiles.map(([l, v]) => <div className="kpi" key={l}><span>{l}</span><strong>{v}</strong></div>)}</div>;
 }
 
@@ -33,12 +32,11 @@ function Analytics() {
     <div className="stack analytics">
       <div className="picker-row"><label>Period <select value={months} onChange={(e) => setMonths(+e.target.value)}>{[3, 6, 12, 24].map((n) => <option key={n} value={n}>Last {n} months</option>)}</select></label></div>
       <div className="kpis">
-        <div className="kpi"><span>GameOn income</span><strong>{money(sum("platformFees") + sum("proSales"))}</strong><small className="muted">fees {money(sum("platformFees"))} · Pro {money(sum("proSales"))}</small></div>
+        <div className="kpi"><span>GameOn income</span><strong>{money(sum("platformFees") + sum("proSales"))}</strong><small className="muted">10% venue fees {money(sum("platformFees"))} · Premium {money(sum("proSales"))}</small></div>
         <div className="kpi"><span>Value booked at clubs</span><strong>{money(sum("courtValue"))}</strong><small className="muted">clubs' revenue, not GameOn's</small></div>
         <div className="kpi"><span>Bookings</span><strong>{(sum("courtBookings") + sum("gameJoins")).toLocaleString()}</strong><small className="muted">{sum("courtBookings").toLocaleString()} courts · {sum("gameJoins").toLocaleString()} game joins</small></div>
         <div className="kpi"><span>Active players</span><strong>{h.activePlayers.toLocaleString()}</strong><small className="muted">{pct(h.repeatPlayers, h.activePlayers)} came back 2+ times</small></div>
         <div className="kpi"><span>Court cancellations</span><strong>{pct(h.courtCancelled, h.courtBookingsAll)}</strong><small className="muted">{h.noShows.toLocaleString()} no-shows</small></div>
-        <div className="kpi"><span>Disputes</span><strong>{h.disputesOpened}</strong><small className="muted">{h.disputesOpenNow} still open</small></div>
       </div>
       <section className="panel"><h3>GameOn income by month</h3>
         <div className="bars" role="img" aria-label="Income by month">{income.map((r) => <div className="bar" key={r.month} title={`${r.month}: ${money(r.income)}`} style={{ height: `${(r.income / maxI) * 100}%` }} />)}</div>
@@ -81,7 +79,7 @@ function Users({ me }) {
           <li key={u.userId}>
             <span><strong>{u.displayName} {u.isAdmin && <span className="pill">Admin</span>} {u.isOperator && <span className="pill">Operator</span>} {u.isPro && <span className="pro-badge">PRO</span>} {u.accountStatus !== "Active" && <span className="pill danger">{u.accountStatus}</span>}</strong>
               <small>#{u.userId} · {u.email} · joined {new Date(u.createdAt + "Z").toLocaleDateString()}{u.lastLoginAt ? ` · last seen ${new Date(u.lastLoginAt + "Z").toLocaleDateString()}` : ""}</small>
-              <small>{u.gamesHosted} hosted · {u.gamesJoined} joined · wallet {money(u.walletBalance)}{u.reportsAgainst ? ` · ${u.reportsAgainst} photo reports` : ""}{u.clubs ? ` · ${u.clubs}` : ""}{u.statusReason ? ` · reason: ${u.statusReason}` : ""}</small></span>
+              <small>{u.gamesHosted} hosted · {u.gamesJoined} joined{u.reportsAgainst ? ` · ${u.reportsAgainst} photo reports` : ""}{u.clubs ? ` · ${u.clubs}` : ""}{u.statusReason ? ` · reason: ${u.statusReason}` : ""}</small></span>
             {u.accountStatus !== "Deleted" && u.userId !== me && (
               <span className="button-row">
                 {u.accountStatus === "Active" ? <button className="secondary" onClick={() => suspend(u)}>Suspend</button> : <button className="primary" onClick={() => restore(u)}>Restore</button>}
@@ -108,7 +106,7 @@ function Settings({ settings, onSaved }) {
       <div className="panel stack"><h3>Switches</h3>
         <label className="checkbox"><input type="checkbox" checked={f.SignupsOpen} onChange={(e) => { setF({ ...f, SignupsOpen: e.target.checked }); save("SignupsOpen", e.target.checked); }} />New sign-ups open</label>
         <label className="checkbox"><input type="checkbox" checked={f.ShotsEnabled} onChange={(e) => { setF({ ...f, ShotsEnabled: e.target.checked }); save("ShotsEnabled", e.target.checked); }} />Players can share Shots (photos)</label></div>
-      <div className="panel stack"><h3>GameOn Pro price (USD per 30 days)</h3>
+      <div className="panel stack"><h3>GameOn Premium price (USD per 30 days)</h3>
         <div className="picker-row"><input type="number" min="1" max="100" step="0.5" value={f.ProMonthlyPrice} onChange={(e) => setF({ ...f, ProMonthlyPrice: e.target.value })} /><button className="primary" onClick={() => save("ProMonthlyPrice", Number(f.ProMonthlyPrice).toFixed(2))}>Save</button></div>
         <p className="muted small">Applies to new purchases and renewals. Existing memberships keep their end date.</p></div>
       <div className="panel stack"><h3>Support email</h3><p className="muted small">Shown to suspended players and in the footer.</p>
@@ -147,7 +145,7 @@ export default function Admin({ user }) {
     <section className="stack admin-page">
       <div className="section-heading"><div><span className="overline">GAMEON ADMIN</span><h1>Admin panel</h1></div></div>
       <div className="segmented tabs-scroll" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
-      {tab === "overview" && <><Overview data={data} /><p className="muted small">Payments, top-ups and disputes are handled under Me → Wallet and Me → Payments (operator role). Clubs are onboarded by operators.</p></>}
+      {tab === "overview" && <><Overview data={data} /><p className="muted small">No money moves through the app: players pay hosts and clubs in person. Venue owners list themselves (10% GameOn fee per booking); operators can also onboard clubs.</p></>}
       {tab === "analytics" && <Analytics />}
       {tab === "users" && <Users me={user.userId} />}
       {tab === "settings" && <Settings settings={data.settings} onSaved={() => setV((x) => x + 1)} />}

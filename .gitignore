@@ -15,3 +15,8 @@ tests/**/obj/
 
 # Uploaded user photos (Shots) are data, never source code
 backend/App_Data/
+
+# Local-only: test credentials, build output, uploaded photos
+scripts/*.local.txt
+frontend/dist/
+backend/App_Data/

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using static Database;
 
-// Migration 27: clubs & courts, classes & coaches, public/private games with approval,
+// Migration 27: clubs & courts, classes, public/private games with approval,
 // friends & chat (real-time via SignalR), loyalty points, rewards and GameOn Pro.
 // Every rule that protects money, places or privacy lives in SQL; these endpoints validate shape and forward.
 [Authorize]
@@ -28,6 +28,13 @@ public static class CommunityEndpoints
     private static Microsoft.Data.SqlClient.SqlParameter Dec(string name, decimal? v, byte precision = 10) => new(name, SqlDbType.Decimal) { Precision = precision, Scale = 2, Value = (object?)v ?? DBNull.Value };
     private static bool Money(decimal v, decimal max = 10000) => v >= 0 && v <= max && decimal.Round(v, 2) == v;
     private static IResult Bad(string error) => Results.BadRequest(new { error });
+    public static readonly HashSet<string> Reactions = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"];
+    /// <summary>Push an event to every member's private user group (membership is computed in SQL, never by the client).</summary>
+    public static async Task PushToMembers(Database db, IHubContext<LiveHub> hub, long conversationId, string evt, object? payload, CancellationToken ct)
+    {
+        var members = (await db.Call("dbo.ConversationMembers", ct, P("@ConversationId", SqlDbType.BigInt, conversationId)))[0];
+        await hub.Clients.Groups(members.Select(m => "user:" + m["userId"]).ToList()).SendAsync(evt, payload, ct);
+    }
 
     public static void MapCommunity(this WebApplication app)
     {
@@ -47,7 +54,8 @@ public static class CommunityEndpoints
                 return Bad("Choose a date within the next 60 days.");
             var s = await db.Call("dbo.GetCourtSchedule", ct, P("@ClubId", SqlDbType.Int, id), P("@Day", SqlDbType.Date, day.ToDateTime(TimeOnly.MinValue)),
                 P("@UserId", SqlDbType.Int, MaybeId(u)), P("@CourtId", SqlDbType.Int, courtId));
-            return Results.Ok(new { slots = s[0], classes = s.Count > 1 ? s[1] : [] });
+            var prices = (await db.Call("dbo.GetCourtPrices", ct, P("@ClubId", SqlDbType.Int, id)))[0];
+            return Results.Ok(new { slots = s[0], classes = s.Count > 1 ? s[1] : [], prices });
         }).RequireRateLimiting("browse");
 
         app.MapPost("/api/courts/{id:int}/bookings", async (int id, CourtBookingInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
@@ -55,7 +63,8 @@ public static class CommunityEndpoints
             if (i.IdempotencyKey == Guid.Empty || i.RewardCode is { Length: not 10 } || i.GuestName?.Length > 80) return Bad("Refresh and try again.");
             var r = (await db.Call("dbo.BookCourt", ct, P("@CourtId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, Id(u)),
                 P("@StartsAtUtc", SqlDbType.DateTime2, i.StartsAtUtc.UtcDateTime), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey),
-                P("@RedemptionCode", SqlDbType.Char, i.RewardCode?.ToUpperInvariant(), 10), P("@GuestName", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(i.GuestName) ? null : i.GuestName.Trim(), 80), P("@PayFromWallet", SqlDbType.Bit, i.PayFromWallet)))[0][0];
+                P("@RedemptionCode", SqlDbType.Char, i.RewardCode?.ToUpperInvariant(), 10), P("@GuestName", SqlDbType.NVarChar, string.IsNullOrWhiteSpace(i.GuestName) ? null : i.GuestName.Trim(), 80),
+                P("@DurationMinutes", SqlDbType.SmallInt, i.DurationMinutes is { } m && m is >= 30 and <= 180 ? m : null)))[0][0];
             return Results.Ok(r);
         }).RequireAuthorization().RequireRateLimiting("checkout");
 
@@ -73,7 +82,7 @@ public static class CommunityEndpoints
             Results.Ok((await db.Call("dbo.RegisterForClass", ct, P("@ClassId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, Id(u)), P("@Cancel", SqlDbType.Bit, i.Cancel)))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
-        // ---------- Club management (role checks in SQL: Owner 4, Manager 3, Reception 2, Coach 1) ----------
+        // ---------- Club management (role checks in SQL: Owner 4, Manager 3, Reception 2) ----------
         app.MapPost("/api/operator/clubs", async (NewClubInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(i.Name) || i.Name.Length > 120 || i.ProDiscountPct > 50 || string.IsNullOrWhiteSpace(i.OwnerEmail)) return Bad("Enter the club name, venue, owner email and a Pro discount of 0–50%.");
@@ -85,7 +94,7 @@ public static class CommunityEndpoints
 
         app.MapPost("/api/clubs/{id:int}/staff", async (int id, StaffInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(i.Email) || i.Role is not (null or "Manager" or "Reception" or "Coach")) return Bad("Enter the staff member's GameOn email and a role.");
+            if (string.IsNullOrWhiteSpace(i.Email) || i.Role is not (null or "Manager" or "Reception")) return Bad("Enter the staff member's GameOn email and a role.");
             var user = (await db.Call("dbo.FindUserForLogin", ct, P("@Email", SqlDbType.NVarChar, i.Email.Trim().ToLowerInvariant(), 254)))[0].FirstOrDefault();
             if (user is null) return Bad("No GameOn account with that email. Ask them to sign up first.");
             return Results.Ok((await db.Call("dbo.SetClubStaff", ct, P("@ClubId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@UserId", SqlDbType.Int, user["userId"]), P("@Role", SqlDbType.VarChar, i.Role, 12)))[0][0]);
@@ -112,7 +121,7 @@ public static class CommunityEndpoints
             if (string.IsNullOrWhiteSpace(i.Title) || i.Title.Length > 120 || i.Weeks is < 1 or > 26 || i.Capacity is < 1 or > 60 || i.DurationMinutes is < 30 or > 240 || !Money(i.Price))
                 return Bad("Check the class title, capacity (1–60), duration (30–240 min), price and weeks (1–26).");
             return Results.Ok((await db.Call("dbo.CreateClassSeries", ct, P("@ClubId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), P("@Title", SqlDbType.NVarChar, i.Title.Trim(), 120),
-                P("@SubtypeId", SqlDbType.Int, i.SubtypeId), P("@CourtId", SqlDbType.Int, i.CourtId), P("@CoachUserId", SqlDbType.Int, i.CoachUserId),
+                P("@SubtypeId", SqlDbType.Int, i.SubtypeId), P("@CourtId", SqlDbType.Int, i.CourtId),
                 P("@FirstStartsAtUtc", SqlDbType.DateTime2, i.FirstStartsAtUtc.UtcDateTime), P("@DurationMinutes", SqlDbType.SmallInt, i.DurationMinutes),
                 P("@Capacity", SqlDbType.SmallInt, i.Capacity), Dec("@Price", i.Price), P("@Weeks", SqlDbType.TinyInt, i.Weeks)))[0][0]);
         }).RequireAuthorization().RequireRateLimiting("checkout");
@@ -128,23 +137,6 @@ public static class CommunityEndpoints
             if (!Money(i.Amount, 1000000) || i.Amount == 0 || i.Note?.Length > 200) return Bad("Enter a positive amount.");
             return Results.Ok((await db.Call("dbo.AddClubExpense", ct, P("@ClubId", SqlDbType.Int, id), P("@ActorId", SqlDbType.Int, Id(u)), Dec("@Amount", i.Amount, 12),
                 P("@Category", SqlDbType.VarChar, i.Category, 16), P("@SpentOn", SqlDbType.Date, i.SpentOn.ToDateTime(TimeOnly.MinValue)), P("@Note", SqlDbType.NVarChar, i.Note, 200)))[0][0]);
-        }).RequireAuthorization().RequireRateLimiting("checkout");
-
-        // ---------- Coaches ----------
-        app.MapGet("/api/coaches", async (int? subtypeId, string? area, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-        {
-            if (area?.Length > 80) return Bad("Area is too long.");
-            var s = await db.Call("dbo.ListCoaches", ct, P("@SubtypeId", SqlDbType.Int, subtypeId), P("@Area", SqlDbType.NVarChar, area, 80), P("@UserId", SqlDbType.Int, MaybeId(u)));
-            return Results.Ok(new { coaches = s[0], mine = s[1].FirstOrDefault() });
-        }).RequireRateLimiting("browse");
-
-        app.MapPut("/api/me/coach-profile", async (CoachInput i, ClaimsPrincipal u, Database db, CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(i.Headline) || i.Headline.Length > 120 || i.Bio?.Length > 800 || i.Area?.Length > 80 || i.SubtypeIds is not { Length: >= 1 and <= 5 } || (i.HourlyRate is { } r && !Money(r)))
-                return Bad("Add a headline, up to 800 characters about you, and 1–5 sports.");
-            return Results.Ok((await db.Call("dbo.SaveCoachProfile", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Headline", SqlDbType.NVarChar, i.Headline.Trim(), 120),
-                P("@Bio", SqlDbType.NVarChar, i.Bio ?? "", 800), Dec("@HourlyRate", i.HourlyRate), P("@Area", SqlDbType.NVarChar, i.Area, 80),
-                P("@SportsJson", SqlDbType.NVarChar, JsonSerializer.Serialize(i.SubtypeIds), 400), P("@IsListed", SqlDbType.Bit, i.IsListed)))[0][0]);
         }).RequireAuthorization().RequireRateLimiting("checkout");
 
         // ---------- Public / private games, host approval ----------
@@ -202,12 +194,35 @@ public static class CommunityEndpoints
             if (i.ClientKey == Guid.Empty || string.IsNullOrWhiteSpace(i.Body) || i.Body.Trim().Length > 1000) return Bad("Write a message (up to 1000 characters).");
             // SendMessage encrypts with ENCRYPTBYKEY before the row is written (the connection itself uses TLS).
             var msg = (await db.Call("dbo.SendMessage", ct, P("@ConversationId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)),
-                P("@Body", SqlDbType.NVarChar, i.Body.Trim(), 1000), P("@ClientKey", SqlDbType.UniqueIdentifier, i.ClientKey)))[0][0];
-            // Push to every member's private user group (membership is computed in SQL, never by the client).
-            var members = (await db.Call("dbo.ConversationMembers", ct, P("@ConversationId", SqlDbType.BigInt, id)))[0];
-            await hub.Clients.Groups(members.Select(m => "user:" + m["userId"]).ToList()).SendAsync("message", msg, ct);
+                P("@Body", SqlDbType.NVarChar, i.Body.Trim(), 1000), P("@ClientKey", SqlDbType.UniqueIdentifier, i.ClientKey),
+                P("@ReplyToId", SqlDbType.BigInt, i.ReplyToId)))[0][0];
+            await PushToMembers(db, hub, id, "message", msg, ct);
             return Results.Ok(msg);
         }).RequireAuthorization().RequireRateLimiting("checkout");
+
+        // Edit (15 minutes), delete for everyone, and emoji reactions. Every change is pushed live as "messageUpdated".
+        app.MapPut("/api/messages/{id:long}", async (long id, EditMessageInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(i.Body) || i.Body.Trim().Length > 1000) return Bad("Write a message (up to 1000 characters).");
+            var msg = (await db.Call("dbo.EditMessage", ct, P("@MessageId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)), P("@Body", SqlDbType.NVarChar, i.Body.Trim(), 1000)))[0][0];
+            await PushToMembers(db, hub, Convert.ToInt64(msg["conversationId"]), "messageUpdated", msg, ct);
+            return Results.Ok(msg);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
+
+        app.MapDelete("/api/messages/{id:long}", async (long id, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            var msg = (await db.Call("dbo.DeleteMessage", ct, P("@MessageId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u))))[0][0];
+            await PushToMembers(db, hub, Convert.ToInt64(msg["conversationId"]), "messageUpdated", msg, ct);
+            return Results.Ok(msg);
+        }).RequireAuthorization().RequireRateLimiting("checkout");
+
+        app.MapPost("/api/messages/{id:long}/reactions", async (long id, ReactionInput i, ClaimsPrincipal u, Database db, IHubContext<LiveHub> hub, CancellationToken ct) =>
+        {
+            if (i.Emoji is null || !Reactions.Contains(i.Emoji)) return Bad("Choose one of the available reactions.");
+            var msg = (await db.Call("dbo.ReactToMessage", ct, P("@MessageId", SqlDbType.BigInt, id), P("@UserId", SqlDbType.Int, Id(u)), P("@Emoji", SqlDbType.NVarChar, i.Emoji, 16)))[0][0];
+            await PushToMembers(db, hub, Convert.ToInt64(msg["conversationId"]), "messageUpdated", msg, ct);
+            return Results.Ok(msg);
+        }).RequireAuthorization().RequireRateLimiting("browse");
 
         // ---------- Loyalty, rewards, GameOn Pro ----------
         app.MapGet("/api/me/rewards", async (ClaimsPrincipal u, Database db, PlatformSettings settings, CancellationToken ct) =>
@@ -221,10 +236,14 @@ public static class CommunityEndpoints
             Results.Ok((await db.Call("dbo.RedeemReward", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@RewardId", SqlDbType.Int, id), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey)))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
+        // Premium subscription (stored as GameOn Pro). Demo: activates for 30 days without collecting money in the app.
         app.MapPost("/api/me/pro", async (KeyInput i, ClaimsPrincipal u, Database db, PlatformSettings settings, CancellationToken ct) =>
             i.IdempotencyKey == Guid.Empty ? Bad("Refresh and try again.") :
-            Results.Ok((await db.Call("dbo.BuyPro", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey),
+            Results.Ok((await db.Call("dbo.ActivatePremium", ct, P("@UserId", SqlDbType.Int, Id(u)), P("@Key", SqlDbType.UniqueIdentifier, i.IdempotencyKey),
                 Dec("@Price", await settings.ProPrice(ct)), P("@Days", SqlDbType.Int, 30)))[0][0]))
+            .RequireAuthorization().RequireRateLimiting("checkout");
+        app.MapDelete("/api/me/pro", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
+            Results.Ok((await db.Call("dbo.CancelPremium", ct, P("@UserId", SqlDbType.Int, Id(u))))[0][0]))
             .RequireAuthorization().RequireRateLimiting("checkout");
 
         app.MapPost("/api/badges", async (BadgeInput i, Database db, CancellationToken ct) =>
@@ -241,20 +260,21 @@ public static class CommunityEndpoints
         (await db.Call("dbo.ListPrivateGamesHidden", ct, P("@UserId", SqlDbType.Int, userId)))[0].Select(r => Convert.ToInt32(r["gameId"])).ToHashSet();
 }
 
-public sealed record CourtBookingInput(DateTimeOffset StartsAtUtc, Guid IdempotencyKey, string? RewardCode = null, string? GuestName = null, bool PayFromWallet = false);
+public sealed record CourtBookingInput(DateTimeOffset StartsAtUtc, Guid IdempotencyKey, string? RewardCode = null, string? GuestName = null, short? DurationMinutes = null);
 public sealed record ClassRegistrationInput(bool Cancel = false);
 public sealed record NewClubInput(int VenueId, string Name, string OwnerEmail, bool IsPartner = false, byte ProDiscountPct = 0);
 public sealed record StaffInput(string Email, string? Role);
 public sealed record CourtInput(int? CourtId, string Name, int SubtypeId, short SlotMinutes, byte OpenHour, byte CloseHour, decimal BasePrice, decimal PeakPrice, byte PeakStartHour, byte PeakEndHour, bool IsActive = true);
 public sealed record BlockInput(DateTimeOffset StartsAtUtc, string? Reason = null);
-public sealed record ClassSeriesInput(string Title, int SubtypeId, int? CourtId, int? CoachUserId, DateTimeOffset FirstStartsAtUtc, short DurationMinutes, short Capacity, decimal Price, byte Weeks = 1);
+public sealed record ClassSeriesInput(string Title, int SubtypeId, int? CourtId, DateTimeOffset FirstStartsAtUtc, short DurationMinutes, short Capacity, decimal Price, byte Weeks = 1);
 public sealed record ExpenseInput(decimal Amount, string Category, DateOnly SpentOn, string? Note = null);
-public sealed record CoachInput(string Headline, string? Bio, decimal? HourlyRate, string? Area, int[] SubtypeIds, bool IsListed = true);
 public sealed record AccessInput(string Visibility, string JoinMode);
 public sealed record JoinRequestInput(string? Message = null, string? InviteCode = null);
 public sealed record DecisionInput(bool Approve);
 public sealed record FriendInput(string Action, string? Email = null, int? UserId = null);
 public sealed record OpenChatInput(string Kind, int? GameId = null, int? ClubId = null, int? UserId = null);
-public sealed record MessageInput(string Body, Guid ClientKey);
+public sealed record MessageInput(string Body, Guid ClientKey, long? ReplyToId = null);
+public sealed record EditMessageInput(string Body);
+public sealed record ReactionInput(string Emoji);
 public sealed record KeyInput(Guid IdempotencyKey);
 public sealed record BadgeInput(int[] UserIds);

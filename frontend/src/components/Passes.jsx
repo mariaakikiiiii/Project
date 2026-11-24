@@ -16,7 +16,7 @@ export function ClubProducts({ club, user, onBought }) {
   if (!list || !list.length) return null;
   async function buy(p) {
     if (!user) { location.hash = "#/sign-in"; return; }
-    if (!confirm(`Buy ${p.name} for ${money(p.price)} from your GameOn wallet?`)) return;
+    if (!confirm(`Take ${p.name}? You pay ${money(p.price)} at the club on your first visit.`)) return;
     setBusy(String(p.productId)); setError(""); setMsg("");
     try { await api(`/products/${p.productId}/buy`, "POST", { idempotencyKey: crypto.randomUUID() }); setMsg(`${p.name} is yours. Find it in Me → Memberships.`); onBought?.(); }
     catch (e) { setError(e.message); } finally { setBusy(""); }
@@ -27,8 +27,8 @@ export function ClubProducts({ club, user, onBought }) {
       <ul className="ledger">{list.filter((p) => p.isActive).map((p) => (
         <li key={p.productId}><span><strong>{p.name}</strong><small>{p.kind === "Membership" ? `Unlimited entry for ${p.durationDays} days` : `${p.credits} classes, valid ${p.durationDays} days`}</small></span>
           <button className="primary" disabled={busy === String(p.productId)} onClick={() => buy(p)}>{money(p.price)}</button></li>))}</ul>
-      <p className="muted small">Paid from your GameOn wallet. GameOn passes the money to the club.</p>
-      {msg && <p className="success" role="status">{msg}</p>}{error && <p className="alert" role="alert">{error}{error.includes("wallet") && <> · <a href="#/wallet">Top up</a></>}</p>}
+      <p className="muted small">No payment in the app: pay the club in person.</p>
+      {msg && <p className="success" role="status">{msg}</p>}{error && <p className="alert" role="alert">{error}</p>}
     </section>
   );
 }

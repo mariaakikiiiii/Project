@@ -16,4 +16,4 @@ export function openChat(conversationId) {
 export function takePendingChat() {
   try { const v = sessionStorage.getItem("gameon.openChat"); sessionStorage.removeItem("gameon.openChat"); return v ? Number(v) : null; } catch { return null; }
 }
-export const ProBadge = ({ show }) => (show ? <span className="pro-badge" title="GameOn Pro member">PRO</span> : null);
+export const ProBadge = ({ show }) => (show ? <span className="pro-badge" title="GameOn Premium member">PRO</span> : null);

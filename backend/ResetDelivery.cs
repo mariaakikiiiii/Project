@@ -13,7 +13,7 @@ public sealed class ResetDelivery(IServiceProvider services, ILogger<ResetDelive
             try
             {
                 var email = services.GetRequiredService<ResetEmail>();
-                if (email.Enabled)
+                if (email.CanDeliver)
                 {
                     var db = services.GetRequiredService<Database>();
                     var lease = Guid.NewGuid();
@@ -23,13 +23,14 @@ public sealed class ResetDelivery(IServiceProvider services, ILogger<ResetDelive
                         var row = rows[0]; bool sent = false;
                         try
                         {
-                            var protector = services.GetRequiredService<IDataProtectionProvider>().CreateProtector("GameOn.ResetEmail.v1");
+                            string purpose = row["purpose"]?.ToString() ?? "Reset";
+                            var protector = services.GetRequiredService<IDataProtectionProvider>().CreateProtector(purpose == "Verify" ? EmailVerification.Purpose : "GameOn.ResetEmail.v1");
                             var token = protector.Unprotect(row["protectedToken"]!.ToString()!);
-                            await email.Send(row["recipient"]!.ToString()!, token, stoppingToken);
+                            await email.Send(row["recipient"]!.ToString()!, token, purpose, stoppingToken);
                             sent = true;
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
-                        { logger.LogWarning("Password email delivery failed ({ErrorType}); retry is queued.", ex.GetType().Name); }
+                        { logger.LogWarning("Email delivery failed ({ErrorType}); retry is queued.", ex.GetType().Name); }
                         await db.Call("dbo.CompleteResetEmail", stoppingToken,
                             P("@Id", SqlDbType.BigInt, row["outboxId"]), P("@Lease", SqlDbType.UniqueIdentifier, lease), P("@Sent", SqlDbType.Bit, sent));
                     }

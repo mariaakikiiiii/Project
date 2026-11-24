@@ -291,10 +291,8 @@ export default function EventWizard({ lookups, existing, onSaved, onBack, config
             <div className="form-wide payment-note">
               <strong>Clear prices. No surprises.</strong>
               <p>
-                New events require a $1 commitment deposit and a 5% service fee on the game share,
-                shown to players at checkout. Free and host-covered places have
-                no platform fee on the covered share; the $1 deposit still applies to new events. Manual Whish
-                transfers, when enabled, are sent to GameOn and require verification.
+                Players join for free in the app. If you set a share per player, they pay it to
+                you in person at the venue. Host-covered places are free for the player.
               </p>
             </div>
           </>

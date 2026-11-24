@@ -13,7 +13,7 @@ BEGIN TRY
  BEGIN TRANSACTION;
  IF NOT EXISTS(SELECT 1 FROM dbo.PlatformMigrations WHERE Version=22) THROW 50002,'Install migration 22 first.',1;
  IF EXISTS(SELECT 1 FROM dbo.PlatformMigrations WHERE Version=25) THROW 50002,'Migration 25 is already installed. Do not rerun it.',1;
- IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name=N'CK__DepositBo__Payme__2057CCD0')
+ IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.DepositBookings') AND name LIKE N'CK[_][_]DepositBo[_][_]Payme[_][_]%' AND definition=N'([PaymentMethod]=''WhishManual'' OR [PaymentMethod]=''Cash'')')
   THROW 50002,'The deposit payment-method constraint is not the expected one. Stop and report this message.',1;
  EXEC(N'CREATE TABLE dbo.WalletAccounts(UserId int NOT NULL CONSTRAINT PK_WalletAccounts PRIMARY KEY REFERENCES dbo.Users(UserId),
  Balance decimal(12,2) NOT NULL CONSTRAINT DF_Wallet_Balance DEFAULT 0 CONSTRAINT CK_Wallet_Balance CHECK(Balance>=0 AND Balance<=500),
@@ -48,7 +48,8 @@ BEGIN TRY
  EXEC(N'CREATE UNIQUE INDEX UX_Ledger_Deposit ON dbo.WalletLedger(Kind,DepositID) WHERE DepositID IS NOT NULL;');
  EXEC(N'CREATE UNIQUE INDEX UX_Ledger_Withdrawal ON dbo.WalletLedger(Kind,WithdrawalId) WHERE WithdrawalId IS NOT NULL;');
  EXEC(N'CREATE INDEX IX_Ledger_User ON dbo.WalletLedger(UserId,EntryId DESC) INCLUDE(Amount,BalanceAfter,Kind,CreatedAt);');
- EXEC(N'ALTER TABLE dbo.DepositBookings DROP CONSTRAINT CK__DepositBo__Payme__2057CCD0;');
+ DECLARE @OldMethodCk sysname=(SELECT name FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.DepositBookings') AND name LIKE N'CK[_][_]DepositBo[_][_]Payme[_][_]%' AND definition=N'([PaymentMethod]=''WhishManual'' OR [PaymentMethod]=''Cash'')');
+ DECLARE @DropOldMethodCk nvarchar(400)=N'ALTER TABLE dbo.DepositBookings DROP CONSTRAINT '+QUOTENAME(@OldMethodCk)+N';'; EXEC(@DropOldMethodCk);
  EXEC(N'ALTER TABLE dbo.DepositBookings ADD CONSTRAINT CK_Deposit_Method CHECK(PaymentMethod IN(''WhishManual'',''Cash'',''Wallet''));');
  EXEC(N'ALTER TABLE dbo.UserActivityLogs DROP CONSTRAINT CK_UserActivity_Action;');
  EXEC(N'ALTER TABLE dbo.UserActivityLogs ADD CONSTRAINT CK_UserActivity_Action CHECK(Action IN(''DiscoverySearch'',''EventViewed'',''FilterApplied'',''JoinAttempt'',''PaymentOptionsViewed'',''DepositInitialized'',''DepositSubmitted'',''DepositReviewed'',''DepositWallet''));');

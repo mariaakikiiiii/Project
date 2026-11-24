@@ -21,7 +21,7 @@ export default function GameAccess({ id, user, game, isHost, isMember, invite, n
         {a.joinMode === "Approval" && <span className="pill warn">Host approves players</span>}
       </div>
       {!isHost && user && a.joinMode === "Approval" && !isMember && (
-        a.myRequest === "Approved" ? <p className="success">The host approved you. Use Join below to confirm your place before spots run out.</p>
+        a.myRequest === "Approved" ? <p className="success">The host approved you. The game was full, so you're on the waitlist.</p>
           : a.myRequest === "Pending" ? <p className="payment-note">Request sent. You'll get a notification when the host decides.</p>
           : a.myRequest === "Declined" ? <p className="muted">The host declined this request.</p>
           : <div className="stack"><label>Message to the host (optional)<input maxLength={200} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Level, position, who you play with…" /></label>
@@ -40,7 +40,7 @@ export default function GameAccess({ id, user, game, isHost, isMember, invite, n
           {groups.length > 0 && <div className="picker-row"><select aria-label="Group to invite" value={groupId} onChange={(e) => setGroupId(e.target.value)}><option value="">Invite one of my groups…</option>{groups.map((g) => <option key={g.groupId} value={g.groupId}>{g.name} ({g.members})</option>)}</select><button className="secondary" disabled={!groupId || busy} onClick={() => run(() => api(`/games/${id}/invite-group`, "POST", { groupId: Number(groupId) }), "Group invited. Each player confirms their own place.")}>Invite</button></div>}
           {data.requests.length > 0 && <ul className="ledger">{data.requests.map((r) => (
             <li key={r.userId}><span><strong>{r.displayName} <ProBadge show={r.isPro} /></strong><small>{r.gamesPlayed} confirmed game{r.gamesPlayed === 1 ? "" : "s"}{r.message ? ` · “${r.message}”` : ""}</small></span>
-              <span className="button-row"><button className="primary" disabled={busy} onClick={() => run(() => api(`/games/${id}/join-requests/${r.userId}`, "POST", { approve: true }), `${r.displayName} approved.`)}>Approve</button>
+              <span className="button-row"><button className="primary" disabled={busy} onClick={() => run(() => api(`/games/${id}/join-requests/${r.userId}`, "POST", { approve: true }), `${r.displayName} approved and added to the game.`)}>Approve</button>
                 <button className="text-link" disabled={busy} onClick={() => run(() => api(`/games/${id}/join-requests/${r.userId}`, "POST", { approve: false }), "Declined.")}>Decline</button></span></li>))}</ul>}
         </details>
       )}

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { money, localTime, localDate, nextDays, openChat, ProBadge } from "./community";
 import { ClubProducts } from "./Passes";
+import VenueDirectory from "./VenueDirectory";
 
-// Player side: find a club, see live court availability, book a slot, join classes, find coaches.
+// Player side: find a club, see live court availability, book a slot, join classes.
 export function SlotGrid({ slots, onPick, selected, staff = false }) {
   const courts = [...new Map(slots.map((s) => [s.courtId, s.court])).entries()];
   if (!slots.length) return <p className="muted">No courts open on this day.</p>;
@@ -33,14 +34,32 @@ export function SlotGrid({ slots, onPick, selected, staff = false }) {
   );
 }
 
-function BookSheet({ slot, club, onClose, onBooked }) {
+export const durationLabel = (m) => m < 60 ? `${m} min` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}min` : ""}`;
+
+// Durations the player can book from this start: every slot it covers must be free (and before closing).
+function freeDurations(slot, courtSlots, prices) {
+  const step = (new Date(slot.localEnd) - new Date(slot.localStart)) / 60000;
+  const i = courtSlots.findIndex((s) => s.startsAtUtc === slot.startsAtUtc);
+  return prices.map((p) => {
+    const need = Math.ceil(p.minutes / step), run = courtSlots.slice(i, i + need);
+    return { ...p, available: run.length === need && run.every((s) => s.slotStatus === "Free") };
+  });
+}
+
+function BookSheet({ slot, club, prices, courtSlots, isPro, onClose, onBooked }) {
   const key = useRef(crypto.randomUUID());
-  const [code, setCode] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState(""), [wallet, setWallet] = useState(true), [balance, setBalance] = useState(null);
-  useEffect(() => { api("/me/wallet").then((w) => setBalance(Number(w.summary.balance))).catch(() => {}); }, []);
-  const pro = Number(slot.proDiscountPct) > 0 ? Math.round(slot.listPrice * slot.proDiscountPct) / 100 : 0;
+  const options = prices.length ? freeDurations(slot, courtSlots, prices) : [];
+  const [minutes, setMinutes] = useState(() => options.find((o) => o.available)?.minutes ?? null);
+  const [code, setCode] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const chosen = options.find((o) => o.minutes === minutes);
+  const list = chosen ? Number(chosen.price) : Number(slot.listPrice);
+  const length = chosen ? chosen.minutes : (new Date(slot.localEnd) - new Date(slot.localStart)) / 60000;
+  const pro = Number(slot.proDiscountPct) > 0 ? Math.round(list * slot.proDiscountPct) / 100 : 0;
+  const [h, m] = localTime(slot.localStart).split(":").map(Number), endMin = h * 60 + m + length;
+  const end = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
   async function book() {
     setBusy(true); setError("");
-    try { const r = await api(`/courts/${slot.courtId}/bookings`, "POST", { startsAtUtc: slot.startsAtUtc + "Z", idempotencyKey: key.current, rewardCode: code.trim() || null, payFromWallet: wallet }); onBooked(r); }
+    try { const r = await api(`/courts/${slot.courtId}/bookings`, "POST", { startsAtUtc: slot.startsAtUtc + "Z", idempotencyKey: key.current, rewardCode: code.trim() || null, durationMinutes: chosen?.minutes ?? null }); onBooked(r); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   return (
@@ -48,20 +67,20 @@ function BookSheet({ slot, club, onClose, onBooked }) {
       <div className="sheet-card">
         <button className="dialog-close" onClick={onClose} aria-label="Close">×</button>
         <span className="overline">{club.name}</span>
-        <h2 id="book-title">{slot.court} · {localDate(slot.localStart)} {localTime(slot.localStart)}–{localTime(slot.localEnd)}</h2>
+        <h2 id="book-title">{slot.court} · {localDate(slot.localStart)} {localTime(slot.localStart)}–{end}</h2>
+        {options.length > 0 && <fieldset className="duration-picker"><legend>How long?</legend><div className="chips">
+          {options.map((o) => <button type="button" key={o.minutes} className={o.minutes === minutes ? "chip active" : "chip"} disabled={!o.available} aria-pressed={o.minutes === minutes}
+            onClick={() => setMinutes(o.minutes)} title={o.available ? "" : "Not free for that long"}>{durationLabel(o.minutes)} · {money(o.price)}</button>)}
+        </div>{!options.some((o) => o.available) && <p className="alert">No duration fits from this start time. Pick another slot.</p>}</fieldset>}
         <dl className="fee-breakdown">
-          <div><dt>Court price{slot.isPeak ? " (peak hour)" : ""}</dt><dd>{money(slot.listPrice)}</dd></div>
-          {pro > 0 && <div><dt>GameOn Pro partner discount ({slot.proDiscountPct}%)</dt><dd>−{money(pro)}</dd></div>}
-          <div className="total"><dt>{wallet ? "Pay now from wallet" : "Pay at the club"}</dt><dd>{money(slot.listPrice - pro)}{code ? " (minus reward)" : ""}</dd></div>
+          <div><dt>Court price ({durationLabel(length)}){slot.isPeak && !chosen ? " (peak hour)" : ""}</dt><dd>{money(list)}</dd></div>
+          {pro > 0 && <div><dt>Premium partner discount ({slot.proDiscountPct}%)</dt><dd>−{money(pro)}</dd></div>}
+          <div className="total"><dt>Pay at the club</dt><dd>{money(list - pro)}{code ? " (minus reward)" : ""}</dd></div>
         </dl>
+        {isPro && length >= 60 && <p className="success">Premium perk: a free water bottle comes with this booking.</p>}
         <label>Reward code (optional)<input value={code} maxLength={10} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="From Rewards" /></label>
-        <fieldset className="payment-selector"><legend>How to pay</legend>
-          <label className="payment-choice"><input type="radio" checked={wallet} onChange={() => setWallet(true)} /><span><strong>GameOn wallet</strong><small>{balance == null ? "Loading balance…" : `Balance ${money(balance)}`} · refunded to your wallet if you cancel in time or the club declines</small></span></label>
-          <label className="payment-choice"><input type="radio" checked={!wallet} onChange={() => setWallet(false)} /><span><strong>Pay at the club</strong><small>Cash or card on arrival</small></span></label>
-        </fieldset>
-        {wallet && balance != null && balance < slot.listPrice - pro && <p className="alert">Not enough in your wallet. <a href="#/wallet">Top up</a> or pay at the club.</p>}
-        <p className="muted small">Free cancellation up to 6 hours before. Some clubs confirm each booking first; you will be notified. You earn 20 points (30 with Pro).</p>
-        <button className="primary full" disabled={busy} onClick={book}>{busy ? "Booking…" : "Book this court"}</button>
+        <p className="muted small">No payment in the app: pay the club in cash or by card when you arrive. Free cancellation up to 6 hours before. Some clubs confirm each booking first; you will be notified. You earn 20 points (30 with Premium).</p>
+        <button className="primary full" disabled={busy || (options.length > 0 && !chosen)} onClick={book}>{busy ? "Booking…" : "Book this court"}</button>
         {error && <p className="alert" role="alert">{error}</p>}
       </div>
     </div>
@@ -70,7 +89,8 @@ function BookSheet({ slot, club, onClose, onBooked }) {
 
 function ClubView({ club, user, onBack }) {
   const days = nextDays(14);
-  const [day, setDay] = useState(days[0]), [data, setData] = useState(null), [version, setVersion] = useState(0), [pick, setPick] = useState(null), [notice, setNotice] = useState(""), [error, setError] = useState(""), [packs, setPacks] = useState([]);
+  const [day, setDay] = useState(days[0]), [data, setData] = useState(null), [version, setVersion] = useState(0), [pick, setPick] = useState(null), [notice, setNotice] = useState(""), [error, setError] = useState(""), [packs, setPacks] = useState([]), [isPro, setIsPro] = useState(false);
+  useEffect(() => { if (user) api("/me/rewards").then((r) => setIsPro(!!r.summary.isPro)).catch(() => {}); }, [user]);
   useEffect(() => { if (user) api("/me/passes").then((r) => setPacks(r.passes.filter((p) => p.clubId === club.clubId && p.kind === "ClassPack" && p.isValid))).catch(() => {}); }, [user, club.clubId, version]);
   async function usePack(c) {
     try { const r = await api(`/classes/${c.classId}/pack-registration`, "POST", { purchaseId: packs[0].purchaseId }); setNotice(`Registered with your class pack (${r.creditsLeft} credits left).`); setVersion((v) => v + 1); } catch (e) { setError(e.message); }
@@ -99,7 +119,7 @@ function ClubView({ club, user, onBack }) {
           {club.latitude != null && <a className="secondary" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${club.latitude},${club.longitude}`}>Directions ↗</a>}
         </div>
       </div>
-      {club.isPartner && Number(club.proDiscountPct) > 0 && <p className="payment-note">GameOn Pro members save {club.proDiscountPct}% on every court here.</p>}
+      {club.isPartner && Number(club.proDiscountPct) > 0 && <p className="payment-note">Premium members save {club.proDiscountPct}% on every court here. <a href="#/subscriptions">See Premium</a></p>}
       <div className="day-chips" role="tablist" aria-label="Choose a day">
         {days.map((d) => <button key={d} role="tab" aria-selected={d === day} className={d === day ? "chip active" : "chip"} onClick={() => setDay(d)}>{localDate(d + "T00:00")}</button>)}
       </div>
@@ -108,37 +128,14 @@ function ClubView({ club, user, onBack }) {
       {!data ? <p className="muted" role="status">Loading availability…</p> : <>
         <SlotGrid slots={data.slots} onPick={(s, k) => { setNotice(""); setError(""); if (s.slotStatus === "Mine") cancel(s); else if (!user) location.hash = "#/sign-in"; else setPick(s); }} />
         {data.classes.length > 0 && <section className="panel"><h2>Classes this day</h2><ul className="ledger">{data.classes.map((c) => (
-          <li key={c.classId}><span><strong>{c.title}</strong><small>{localTime(c.localStart)} · {c.durationMinutes} min{c.coach ? ` · Coach ${c.coach}` : ""} · {c.registered}/{c.capacity} booked · {money(c.price)}</small></span>
+          <li key={c.classId}><span><strong>{c.title}</strong><small>{localTime(c.localStart)} · {c.durationMinutes} min · {c.registered}/{c.capacity} booked · {money(c.price)}</small></span>
             <span className="button-row">{!c.myStatus && packs.length > 0 && c.registered < c.capacity && <button className="secondary" onClick={() => usePack(c)}>Use pack credit</button>}
             <button className={c.myStatus ? "secondary" : "primary"} onClick={() => classAction(c)}>{c.myStatus === "Registered" ? "Cancel" : c.myStatus === "Waitlisted" ? "Leave waitlist" : c.registered >= c.capacity ? "Join waitlist" : "Join class"}</button></span></li>))}</ul></section>}
       </>}
       <ClubProducts club={club} user={user} onBought={() => setVersion((v) => v + 1)} />
-      {pick && <BookSheet slot={pick} club={club} onClose={() => setPick(null)} onBooked={(r) => { setPick(null); setNotice(r.status === "Pending" ? "Request sent. The club will confirm it and you will get a notification." : r.paidFromWallet ? `Booked and paid ${money(r.price)} from your wallet.` : `Booked! Pay ${money(r.price)} at the club.`); setVersion((v) => v + 1); }} />}
-    </section>
-  );
-}
-
-function Coaches({ lookups }) {
-  const [sport, setSport] = useState(""), [data, setData] = useState(null);
-  useEffect(() => { api(`/coaches${sport ? `?subtypeId=${sport}` : ""}`).then(setData).catch(() => setData({ coaches: [] })); }, [sport]);
-  return (
-    <section className="stack">
-      <label>Sport<select value={sport} onChange={(e) => setSport(e.target.value)}><option value="">All sports</option>{lookups.sports.filter((s) => s.categorySlug === "sports").map((s) => <option key={s.sportId} value={s.sportId}>{s.name}</option>)}</select></label>
-      {!data ? <p className="muted">Loading coaches…</p> : data.coaches.length === 0 ? (
-        <div className="panel empty-coaches">
-          <h2>No coaches here yet</h2>
-          <p className="muted">GameOn only lists real coaches who create their own profile, so this list grows as coaches join. Clubs can also add their coaches as staff.</p>
-          <div className="button-row"><a className="primary" href="#/profile" onClick={() => { try { sessionStorage.setItem("gameon.openCoach", "1"); } catch { /* ignore */ } }}>I am a coach: create my profile</a>
-          <a className="secondary" href="#/venues">Find clubs and venues instead</a></div>
-          <p className="muted small">Know a good coach? Ask them to sign up and fill in Me → Coach profile.</p>
-        </div>) :
-        <div className="card-grid">{data.coaches.map((c) => (
-          <article className="panel coach-card" key={c.userId}>
-            <h3>{c.displayName} <ProBadge show={c.isPro} /></h3><p><strong>{c.headline}</strong></p>
-            <p className="muted small">{[c.sports, c.area, c.clubs && `Coaches at ${c.clubs}`].filter(Boolean).join(" · ")}</p>
-            {c.bio && <p className="small">{c.bio}</p>}
-            <p>{c.hourlyRate != null ? `${money(c.hourlyRate)}/hour` : "Rate on request"}{c.upcomingClasses > 0 ? ` · ${c.upcomingClasses} upcoming classes` : ""}</p>
-          </article>))}</div>}
+      {pick && data && <BookSheet slot={pick} club={club} isPro={Number(pick.proDiscountPct) > 0 || isPro}
+        prices={(data.prices || []).filter((p) => p.courtId === pick.courtId)} courtSlots={data.slots.filter((s) => s.courtId === pick.courtId)}
+        onClose={() => setPick(null)} onBooked={(r) => { setPick(null); setNotice(r.status === "Pending" ? "Request sent. The club will confirm it and you will get a notification." : `Booked! Pay ${money(r.price)} at the club.${r.freeWater ? " Your free Premium water bottle is included." : ""}`); setVersion((v) => v + 1); }} />}
     </section>
   );
 }
@@ -154,7 +151,7 @@ function MyBookings() {
     <section className="panel">
       <h2>Your upcoming courts & classes</h2>
       <ul className="ledger">
-        {upcoming.map((b) => <li key={b.bookingId}><span><strong>{b.club} · {b.court}{b.status === "Pending" ? " · awaiting club" : ""}</strong><small>{localDate(b.localStart)} {localTime(b.localStart)} · {b.paidFromWallet ? `paid ${money(b.price)} in-app` : `pay ${money(b.price)} at the club`}{b.proDiscount ? " (Pro price)" : ""}</small></span>
+        {upcoming.map((b) => <li key={b.bookingId}><span><strong>{b.club} · {b.court}{b.status === "Pending" ? " · awaiting club" : ""}</strong><small>{localDate(b.localStart)} {localTime(b.localStart)} · {b.paidFromWallet ? `paid ${money(b.price)} in-app` : `pay ${money(b.price)} at the club`}{b.proDiscount ? " (Premium price)" : ""}</small></span>
           {b.canCancel ? <button className="secondary" onClick={async () => { if (confirm("Cancel this booking?")) { await api(`/court-bookings/${b.bookingId}`, "DELETE"); setV((x) => x + 1); } }}>Cancel</button> : <span className="pill warn">Within 6 h</span>}</li>)}
         {data.classes.map((c) => <li key={`c${c.classId}`}><span><strong>{c.title}</strong><small>{c.club} · {localDate(c.localStart)} {localTime(c.localStart)}</small></span><span className="pill">{c.status}</span></li>)}
       </ul>
@@ -162,22 +159,36 @@ function MyBookings() {
   );
 }
 
-export default function Courts({ lookups, user }) {
-  const [tab, setTab] = useState("clubs"), [sport, setSport] = useState(""), [q, setQ] = useState(""), [data, setData] = useState(null), [club, setClub] = useState(null);
+// "Courts" menu: Find your court (GameOn clubs with live availability) or Find your venue (any venue in Lebanon, on the map).
+export default function Courts({ lookups, user, config, mode = "court", navigate }) {
+  return (
+    <section className="courts-page">
+      <div className="section-heading"><div><span className="overline">COURTS · CLUBS · VENUES</span><h1>Courts</h1></div></div>
+      <div className="mode-switch" role="tablist" aria-label="What are you looking for?">
+        <button role="tab" aria-selected={mode === "court"} className={mode === "court" ? "active" : ""} onClick={() => navigate("courts")}>
+          <strong>Find your court</strong><small>Clubs on GameOn · live availability · book online</small></button>
+        <button role="tab" aria-selected={mode === "venue"} className={mode === "venue" ? "active" : ""} onClick={() => navigate("venues")}>
+          <strong>Find your venue</strong><small>Any venue in Lebanon · map · contact details</small></button>
+      </div>
+      {mode === "venue" ? <VenueDirectory lookups={lookups} config={config} user={user} embedded /> : <FindCourt lookups={lookups} user={user} />}
+    </section>
+  );
+}
+
+function FindCourt({ lookups, user }) {
+  const [sport, setSport] = useState(""), [q, setQ] = useState(""), [data, setData] = useState(null), [club, setClub] = useState(null);
   useEffect(() => { const c = new AbortController(); const t = setTimeout(() => api(`/clubs?${new URLSearchParams({ ...(sport ? { subtypeId: sport } : {}), ...(q.trim() ? { q: q.trim() } : {}) })}`, "GET", undefined, { signal: c.signal }).then(setData).catch(() => {}), 250); return () => { clearTimeout(t); c.abort(); }; }, [sport, q]);
   if (club) return <ClubView club={club} user={user} onBack={() => setClub(null)} />;
   return (
-    <section className="courts-page">
-      <div className="section-heading"><div><span className="overline">BOOK A COURT · JOIN A CLASS · FIND A COACH</span><h1>Courts & clubs</h1></div></div>
-      <div className="segmented" role="tablist"><button role="tab" aria-selected={tab === "clubs"} className={tab === "clubs" ? "active" : ""} onClick={() => setTab("clubs")}>Clubs & courts</button><button role="tab" aria-selected={tab === "coaches"} className={tab === "coaches" ? "active" : ""} onClick={() => setTab("coaches")}>Coaches</button></div>
-      {tab === "coaches" ? <Coaches lookups={lookups} /> : <>
+    <>
+      {<>
         {user && <MyBookings />}
         <div className="filters-row">
           <input aria-label="Search clubs or towns" placeholder="Search a club or town" value={q} maxLength={80} onChange={(e) => setQ(e.target.value)} />
           <select aria-label="Sport" value={sport} onChange={(e) => setSport(e.target.value)}><option value="">All sports</option>{lookups.sports.filter((s) => s.categorySlug === "sports").map((s) => <option key={s.sportId} value={s.sportId}>{s.name}</option>)}</select>
         </div>
         {!data ? <p className="muted" role="status">Loading clubs…</p> : data.clubs.length === 0 ? (
-          <div className="panel"><h2>No clubs with online booking here yet</h2><p className="muted">Clubs appear once they join GameOn and list their courts. Meanwhile, find venues to call in <a href="#/venues">Venues</a>.</p></div>
+          <div className="panel"><h2>No clubs with online booking here yet</h2><p className="muted">Clubs appear once they join GameOn and list their courts. Meanwhile, find venues to call in <a href="#/venues">Find your venue</a>.</p></div>
         ) : <div className="card-grid">{data.clubs.map((c) => (
           <button className="panel club-card" key={c.clubId} onClick={() => setClub(c)}>
             <span className="overline">{c.area}{c.isPartner ? " · PARTNER" : ""}</span><h3>{c.name}</h3>
@@ -186,6 +197,6 @@ export default function Courts({ lookups, user }) {
             <span className="text-link">See availability →</span>
           </button>))}</div>}
       </>}
-    </section>
+    </>
   );
 }

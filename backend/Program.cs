@@ -21,12 +21,6 @@ builder.Services.AddHttpClient("nominatim", c => { c.Timeout = TimeSpan.FromSeco
 // Google short links are followed manually so every hop can be checked against Google hosts.
 builder.Services.AddHttpClient("googlelinks", c => c.Timeout = TimeSpan.FromSeconds(8)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }).RemoveAllLoggers();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<MockPaymentSecurity>();
-builder.Services.AddSingleton<MockPaymentProcessor>();
-builder.Services.AddSingleton<GameOn.Payments.WhishMerchantConfiguration>();
-builder.Services.AddHttpClient("whish", (services, client) => { client.BaseAddress = services.GetRequiredService<GameOn.Payments.WhishMerchantConfiguration>().BaseAddress; client.Timeout = TimeSpan.FromSeconds(15); });
-builder.Services.AddSingleton<GameOn.Payments.IWhishGateway, GameOn.Payments.UnconfiguredWhishGateway>();
-builder.Services.AddHttpClient("email", c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ResetEmail>();
 builder.Services.AddHostedService<ResetDelivery>();
 builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210000);
@@ -70,7 +64,10 @@ builder.Services.AddRateLimiter(o =>
         { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
-_ = app.Services.GetRequiredService<MockPaymentSecurity>();
+// Behind the demo tunnel (scripts/start-public.ps1) every request reaches the API from 127.0.0.1. Read the visitor's
+// address from X-Forwarded-For so rate limits apply per person, not to everyone at once. Only loopback proxies are
+// trusted (the framework default), so a remote client cannot spoof its address. Host and scheme stay untouched.
+app.UseForwardedHeaders(new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions { ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor, ForwardLimit = 2 });
 _ = app.Services.GetRequiredService<AppSecrets>(); // fail fast when keys are missing
 app.Use(async (ctx, next) =>
 {
@@ -90,8 +87,6 @@ app.Use(async (ctx, next) =>
     { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
     catch (SqlException ex) when (ex.Number is 50003 && ex.Message.Length < 200 && !ex.Message.Contains("permission", StringComparison.OrdinalIgnoreCase))
     { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
-    catch (SqlException ex) when (ex.Number is 50006)
-    { ctx.Response.StatusCode = 402; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message, code = "wallet_insufficient" }); }
     catch (SqlException ex) when (ex.Number is 50003)
     { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "You do not have permission to perform this action." }); }
     catch (SqlException ex) when (ex.Number is 50004)
@@ -118,9 +113,10 @@ app.Use(async (ctx, next) =>
     await next();
 });
 app.UseAuthentication(); app.UseAuthorization(); app.UseRateLimiter();
+app.UseEmailVerificationGate();
 app.Use(async (ctx, next) =>
 {
-    if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method) && !HttpMethods.IsOptions(ctx.Request.Method) && !(HttpMethods.IsPost(ctx.Request.Method) && ctx.Request.Path == CommercialEndpoints.MockWebhookPath))
+    if (!HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method) && !HttpMethods.IsOptions(ctx.Request.Method))
     {
         try { await ctx.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(ctx); }
         catch (AntiforgeryValidationException)
@@ -150,7 +146,10 @@ app.MapPost("/api/auth/register", async (Register input, HttpContext ctx, Databa
         new Claim("stamp",(await db.Call("dbo.CheckSession", ct, P("@UserId", SqlDbType.Int, Convert.ToInt32(registered["userId"]))))[0][0]["sessionStamp"]!.ToString()!)
     },CookieAuthenticationDefaults.AuthenticationScheme));
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,principal);
-    return Results.Ok(new { message = "Your account is ready." });
+    // Booking and chat unlock once the emailed link is opened (EmailVerification.cs).
+    try { await EmailVerification.Queue(db, ctx.RequestServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(), Convert.ToInt32(registered["userId"]), ct); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { app.Logger.LogWarning("Could not queue verification email ({ErrorType})", ex.GetType().Name); }
+    return Results.Ok(new { message = "Your account is ready. Check your email to confirm it before booking or chatting." });
 }).RequireRateLimiting("auth");
 app.MapPost("/api/auth/login", async (Login input, HttpContext ctx, Database db, IPasswordHasher<string> hasher, CancellationToken ct) =>
 {
@@ -185,7 +184,8 @@ app.MapPost("/api/auth/logout", async (HttpContext ctx) => { await ctx.SignOutAs
 app.MapGet("/api/auth/me", async (ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
     var profile = (await db.Call("dbo.GetProfile", ct, P("@UserId", SqlDbType.Int, UserId(u))))[0][0];
-    return Results.Ok(new { name = profile["displayName"], userId = UserId(u), canManageVenues=profile["canManageVenues"], isAdmin=profile["isAdmin"] });
+    return Results.Ok(new { name = profile["displayName"], userId = UserId(u), canManageVenues=profile["canManageVenues"], isAdmin=profile["isAdmin"],
+        email = profile["email"], emailVerified = await EmailVerification.IsVerified(db, UserId(u), ct) });
 }).RequireAuthorization();
 app.MapGet("/api/lookups", async (Database db, CancellationToken ct) =>
 {
@@ -249,22 +249,18 @@ app.MapPost("/api/games", async (NewGame input, ClaimsPrincipal user, Database d
 }).RequireAuthorization().RequireRateLimiting("checkout");
 app.MapPost("/api/games/{id:int}/join", async (int id, JoinRequest? input, ClaimsPrincipal u, Database db, CancellationToken ct) =>
 {
-    if (input?.PaymentMethod is not null and not "Cash" and not "Whish") return Results.BadRequest(new { error = "Unknown payment method." });
-    var quote = (await db.Call("dbo.GetPaymentQuote", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0];
-    if (Convert.ToDecimal(quote["amount"]) > 0 && !Convert.ToBoolean(quote["alreadyEnrolled"]))
-        return Results.BadRequest(new { error = "Review the fee breakdown using checkout before reserving this event." });
+    // No in-app payment: any venue share is settled with the host in person.
     return Results.Ok((await db.Call("dbo.sp_JoinGameOrActivity", ct, P("@GameId", SqlDbType.Int, id),
-        P("@UserId", SqlDbType.Int, UserId(u)), P("@PaymentMethod", SqlDbType.VarChar, input?.PaymentMethod ?? "Cash", 12)))[0][0]);
+        P("@UserId", SqlDbType.Int, UserId(u)), P("@PaymentMethod", SqlDbType.VarChar, "Cash", 12)))[0][0]);
 }).RequireAuthorization();
 app.MapDelete("/api/games/{id:int}/participation", async (int id, ClaimsPrincipal u, Database db, CancellationToken ct) =>
     Results.Ok((await db.Call("dbo.CancelParticipation", ct, P("@GameId", SqlDbType.Int, id), P("@UserId", SqlDbType.Int, UserId(u))))[0][0])).RequireAuthorization();
 app.MapPlatform();
+app.MapEmailVerification();
 app.MapCommercial();
-app.MapDeposits();
 app.MapVenueDirectory();
-app.MapAttendance();
-app.MapWallet();
 app.MapCommunity();
+app.MapMyVenues();
 app.MapClubSuite();
 app.MapAdmin();
 app.Run();
