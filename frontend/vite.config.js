@@ -42,5 +42,13 @@ export default defineConfig({
         configure: (proxy) => proxy.on('error', (err) => console.error(`[gameon] API proxy error: ${err.code || err.message}. Is the API running on ${target}?`)) },
       '/hubs': { target, secure: true, ws: true, agent } // SignalR live chat (WebSockets)
     }
+  },
+  // `vite preview` is only used behind the Cloudflare tunnel (scripts/start-public.ps1): it listens on this PC only
+  // (127.0.0.1) over plain HTTP, and Cloudflare provides HTTPS to visitors. Without this it would inherit the LAN
+  // certificate's HTTPS from `server` and the tunnel (which connects over http) would fail.
+  preview: {
+    host: '127.0.0.1',
+    https: false,
+    allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1']
   }
 });
