@@ -58,4 +58,4 @@ Session 2 must block until commit, then return Waitlisted. Assert count = 2, A i
 
 ## Platform upgrade
 
-See [UPGRADE.md](UPGRADE.md) for additive migration, preference ranking, host-only editing/cancellation, sponsorship rules, notification polling, Maps Embed and password-email activation. See [payments-contract.md](payments-contract.md) for the pending provider integration boundary. No online funds are moved by the current app.
+See [UPGRADE.md](UPGRADE.md) for additive migration, preference ranking, host-only editing/cancellation, sponsorship rules, notification polling, Maps Embed and password-email activation. No online funds are moved by the current app.

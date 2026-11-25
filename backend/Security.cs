@@ -7,17 +7,15 @@ using static Database;
 
 /// <summary>
 /// Server-only secrets (User Secrets / environment variables, never Git or the database).
-/// Security:PasswordPepper must be 32 random bytes in base64 (Security:MessageKey is only needed to migrate old messages).
+/// Security:PasswordPepper must be 32 random bytes in base64. Chat messages are encrypted inside SQL Server (migration 34).
 /// The API refuses to start without them, so nothing is ever stored with a missing or weak key.
 /// </summary>
 public sealed class AppSecrets
 {
     public byte[] PasswordPepper { get; }
-    public byte[]? LegacyMessageKey { get; } // only to read messages encrypted by migration 33
     public AppSecrets(IConfiguration config)
     {
         PasswordPepper = Load(config, "Security:PasswordPepper");
-        LegacyMessageKey = config["Security:MessageKey"] is { Length: > 0 } ? Load(config, "Security:MessageKey") : null;
     }
     static byte[] Load(IConfiguration config, string name)
     {
@@ -75,58 +73,5 @@ public sealed class Argon2idPasswordHasher(AppSecrets secrets, IOptions<Password
         { hash = hash[3..]; input = Convert.ToBase64String(HMACSHA256.HashData(secrets.PasswordPepper, Encoding.UTF8.GetBytes(providedPassword))); }
         try { return legacy.VerifyHashedPassword(user, hash, input) == PasswordVerificationResult.Failed ? PasswordVerificationResult.Failed : PasswordVerificationResult.SuccessRehashNeeded; }
         catch (FormatException) { return PasswordVerificationResult.Failed; }
-    }
-}
-
-/// <summary>
-/// Chat messages are now encrypted INSIDE SQL Server (AES-256 symmetric key protected by a certificate,
-/// ENCRYPTBYKEY / DECRYPTBYKEYAUTOCERT in the stored procedures, migration 34). This class only reads messages
-/// that migration 33 had encrypted in the API ("enc1:"), so they can be re-sealed with the SQL Server key.
-/// </summary>
-public sealed class LegacyMessageCrypto(AppSecrets secrets)
-{
-    public string? Decrypt(long conversationId, string stored)
-    {
-        if (secrets.LegacyMessageKey is null || !stored.StartsWith("enc1:", StringComparison.Ordinal)) return null;
-        try
-        {
-            byte[] b = Convert.FromBase64String(stored[5..]);
-            byte[] pt = new byte[b.Length - 28];
-            using var aes = new AesGcm(secrets.LegacyMessageKey, 16);
-            aes.Decrypt(b.AsSpan(0, 12), b.AsSpan(28), b.AsSpan(12, 16), pt, Encoding.UTF8.GetBytes("GameOn.Message.v1:" + conversationId));
-            return Encoding.UTF8.GetString(pt);
-        }
-        catch (Exception e) when (e is CryptographicException or FormatException or ArgumentException) { return null; }
-    }
-}
-
-/// <summary>Moves messages encrypted by migration 33's API key under the SQL Server key (runs once at startup).</summary>
-public sealed class MessageEncryptionBackfill(Database db, LegacyMessageCrypto crypto, ILogger<MessageEncryptionBackfill> log) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken ct)
-    {
-        try
-        {
-            int sealedCount = 0, unreadable = 0; long after = 0;
-            while (!ct.IsCancellationRequested)
-            {
-                var rows = (await db.Call("dbo.ListLegacyMessages", ct, P("@Top", SqlDbType.Int, 500)))[0]
-                    .Where(r => Convert.ToInt64(r["messageId"]) > after).ToList();
-                if (rows.Count == 0) break;
-                foreach (var r in rows)
-                {
-                    long id = Convert.ToInt64(r["messageId"]); after = Math.Max(after, id);
-                    string stored = r["body"]!.ToString()!;
-                    var plain = crypto.Decrypt(Convert.ToInt64(r["conversationId"]), stored);
-                    if (plain is null) { unreadable++; continue; }
-                    await db.Call("dbo.SealLegacyMessage", ct, P("@MessageId", SqlDbType.BigInt, id), P("@Expected", SqlDbType.NVarChar, stored, -1),
-                        P("@Plain", SqlDbType.NVarChar, plain.Length > 1000 ? plain[..1000] : plain, 1000));
-                    sealedCount++;
-                }
-            }
-            if (sealedCount + unreadable > 0) log.LogInformation("Moved {Count} messages to SQL Server encryption ({Unreadable} unreadable)", sealedCount, unreadable);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        { log.LogWarning("Message re-encryption skipped ({Error}). Is migration 34 installed?", e.GetType().Name); }
     }
 }

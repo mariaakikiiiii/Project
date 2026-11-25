@@ -1,4 +1,4 @@
--- Non-executable template. scripts/gen-34.py adds the edited existing procedures, then
+-- Non-executable template (generated once from the live procedures; kept as the readable source of migration 34).
 -- scripts/build-migration.py turns the result into database/34-db-hardening.sql.
 -- 1) Money moves only in procedures: the 7 triggers that refunded, flagged or credited money are replaced by explicit calls.
 -- 2) Wallet balance = sum of ledger rows, enforced by the database (indexed view + check triggers + row locks).

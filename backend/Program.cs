@@ -26,8 +26,6 @@ builder.Services.AddHostedService<ResetDelivery>();
 builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210000);
 builder.Services.AddSingleton<AppSecrets>();
 builder.Services.AddSingleton<IPasswordHasher<string>, Argon2idPasswordHasher>();
-builder.Services.AddSingleton<LegacyMessageCrypto>();
-builder.Services.AddHostedService<MessageEncryptionBackfill>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o =>
 {
     o.Cookie.Name = "GameOn.Session";

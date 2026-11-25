@@ -37,7 +37,9 @@ async function register(name) {
   const c = new Client(); c.email = `${name}.${tag}@gameon.invalid`;
   const r = await c.json("/api/auth/register", "POST", { email: c.email, displayName: `${name} ${tag}`, password: "correct-horse-battery", gender: "PreferNotToSay", dateOfBirth: "2000-01-02", sportIds: [padel] });
   if (r.status !== 200) throw new Error(`register ${name}: ${r.status} ${JSON.stringify(r.body)}`);
-  c.csrf = null; c.id = (await c.json("/api/auth/me")).body.userId; return c;
+  c.csrf = null; c.id = (await c.json("/api/auth/me")).body.userId;
+  // Migration 36: hosting needs a verified email. Test accounts are marked verified directly (no inbox in tests).
+  sql(`UPDATE dbo.Users SET EmailVerifiedAt=SYSUTCDATETIME() WHERE UserId=${c.id}`); return c;
 }
 const op = await register("cop"), owner = await register("cowner"), p1 = await register("cp1"), p2 = await register("cp2");
 sql(`INSERT dbo.PaymentOperators(UserId) VALUES(${op.id})`);
